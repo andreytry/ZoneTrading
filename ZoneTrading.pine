@@ -109,10 +109,25 @@ if bar_index >= max_small_candles + 2 and in_last_days
             // Check if the candle before small candles is long  
             bool long_before = sz_long_before >= min_long_body
             
-            // Check if all intermediate candles are small
+            // Check if all intermediate candles are small AND have acceptable wick-to-body ratio
             bool all_small = true
             for j = 1 to small_count
+                // Check if candle body is small enough
                 if body_size(j) >= sz_cur / length_ratio
+                    all_small := false
+                    break
+                
+                // Check wick filter - reject zone if any small candle has wick > 3x body
+                body = body_size(j)
+                if body > 0
+                    upper_wick = high[j] - math.max(open[j], close[j])
+                    lower_wick = math.min(open[j], close[j]) - low[j]
+                    max_wick = math.max(upper_wick, lower_wick)
+                    if max_wick > body * 3
+                        all_small := false
+                        break
+                else
+                    // Reject doji candles (body = 0)
                     all_small := false
                     break
             
