@@ -1,12 +1,14 @@
 //@version=5 
-indicator("Supply/Demand Zones (ATR Filter, Bodies Only, Prolonged)", overlay=true, max_boxes_count=50)  
+indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)  
 
 // === Inputs ===
 length_ratio     = input.float(2.0, "Body Ratio (Long/Short)", step=0.1)
-zone_length      = input.int(100, "Zone Plot Length (bars)")  // kept for initial length, but will prolong
+initial_length   = input.int(100, "Initial Zone Length (bars)")
 days_back        = input.int(100, "Draw Zones For Last N Days")
 atr_length       = input.int(14, "ATR Period")
-long_atr_filter  = input.float(0.7, "Long min body as % of ATR", step=0.01)  // <-- Percentage filter param
+long_atr_filter  = input.float(0.7, "Long min body as % of ATR", step=0.01)
+breach_threshold = input.float(0.8, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
+max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
 
 // === Helpers ===
 body_size(idx) => math.abs(close[idx] - open[idx])
@@ -21,66 +23,139 @@ ms_in_day   = 24 * 60 * 60 * 1000
 start_time  = timenow - days_back * ms_in_day
 in_last_days = time >= start_time
 
-// === Arrays to store boxes ===
-var box[] zone_boxes = array.new<box>()
+// === Zone tracking type ===
+type ZoneData
+    box zone_box
+    float top
+    float bottom
+    string zone_type
+    int creation_bar
 
-// === Pattern Logic from Latest Table, using BODIES ONLY and ATR Filter ===
-if bar_index >= 2 and in_last_days
-    float sz_cur = body_size(0)
-    float sz_n1  = body_size(1)
-    float sz_n2  = body_size(2)
+// === Arrays to store zone data ===
+var array<ZoneData> active_zones = array.new<ZoneData>()
 
+// === Function to check if zone is breached ===
+is_zone_breached(zone_data) =>
+    zone_height = zone_data.top - zone_data.bottom
+    breach_amount = zone_height * breach_threshold
+    
+    if zone_data.zone_type == "Supply"
+        // Supply zone breached when price closes significantly above the top
+        close > zone_data.top + breach_amount
+    else
+        // Demand zone breached when price closes significantly below the bottom
+        close < zone_data.bottom - breach_amount
+
+// === Function to find zone boundaries using wick-based logic ===
+find_zone_boundaries(start_idx, num_small_candles, zone_type) =>
+    float zone_top = na
+    float zone_bottom = na
+    
+    if zone_type == "Demand"
+        // For demand zones: top = highest close of small candles, bottom = lowest low of small candles
+        zone_top := close[start_idx]
+        zone_bottom := low[start_idx]
+        
+        for i = 1 to num_small_candles
+            if start_idx + i < bar_index
+                zone_top := math.max(zone_top, close[start_idx + i])
+                zone_bottom := math.min(zone_bottom, low[start_idx + i])
+    else
+        // For supply zones: top = highest high of small candles, bottom = lowest close of small candles  
+        zone_top := high[start_idx]
+        zone_bottom := close[start_idx]
+        
+        for i = 1 to num_small_candles
+            if start_idx + i < bar_index
+                zone_top := math.max(zone_top, high[start_idx + i])
+                zone_bottom := math.min(zone_bottom, close[start_idx + i])
+    
+    [zone_top, zone_bottom]
+
+// === Function to update zone extensions ===
+update_zones() =>
+    if array.size(active_zones) > 0
+        i = array.size(active_zones) - 1
+        while i >= 0
+            zone_data = array.get(active_zones, i)
+            
+            // Check if zone is breached
+            if is_zone_breached(zone_data)
+                // Remove breached zone
+                box.delete(zone_data.zone_box)
+                array.remove(active_zones, i)
+            else
+                // Extend the zone to current bar
+                box.set_right(zone_data.zone_box, bar_index)
+            i := i - 1
+
+// === Main Pattern Detection Logic ===
+if bar_index >= max_small_candles + 2 and in_last_days
     float min_long_body = atr_val * long_atr_filter
+    
+    // Check for patterns with varying numbers of small candles (1 to max_small_candles)
+    for small_count = 1 to max_small_candles
+        if bar_index >= small_count + 2
+            // Get candle properties
+            float sz_cur = body_size(0)
+            float sz_long_before = body_size(small_count + 1)
+            
+            string cur_color = is_green(0) ? "green" : is_red(0) ? "red" : "na"
+            string long_before_color = is_green(small_count + 1) ? "green" : is_red(small_count + 1) ? "red" : "na"
+            
+            // Check if current candle is long
+            bool long_cur = sz_cur >= min_long_body
+            
+            // Check if the candle before small candles is long  
+            bool long_before = sz_long_before >= min_long_body
+            
+            // Check if all intermediate candles are small
+            bool all_small = true
+            for j = 1 to small_count
+                if body_size(j) >= sz_cur / length_ratio
+                    all_small := false
+                    break
+            
+            if long_cur and long_before and all_small
+                string zone_type = na
+                color zone_color = na
+                string zone_title = na
+                
+                // Apply the pattern rules from the table
+                if cur_color == "green" and long_before_color == "red"
+                    zone_type := "Demand"
+                    zone_color := color.orange
+                    zone_title := "drop-base-rally"
+                else if cur_color == "green" and long_before_color == "green"
+                    zone_type := "Demand" 
+                    zone_color := color.orange
+                    zone_title := "rally-base-rally"
+                else if cur_color == "red" and long_before_color == "green"
+                    zone_type := "Supply"
+                    zone_color := color.blue
+                    zone_title := "rally-base-drop"
+                else if cur_color == "red" and long_before_color == "red"
+                    zone_type := "Supply"
+                    zone_color := color.blue
+                    zone_title := "drop-base-drop"
+                
+                if not na(zone_type)
+                    // Find zone boundaries using wick-based method
+                    [zone_top, zone_bottom] = find_zone_boundaries(1, small_count, zone_type)
+                    
+                    // Create the zone box
+                    new_box = box.new(bar_index-small_count, zone_top, bar_index-small_count+initial_length, zone_bottom, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=zone_title, text_color=zone_color, text_size=size.small)
+                    
+                    // Create zone data and add to active zones
+                    new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, bar_index-small_count)
+                    
+                    array.unshift(active_zones, new_zone)
+                    break  // Found a pattern, no need to check longer sequences
 
-    bool short_n1 = sz_n1 < sz_cur / length_ratio
-    bool long_cur = sz_cur >= sz_n1 * length_ratio and sz_cur >= min_long_body
-    bool long_n2  = sz_n2 >= sz_n1 * length_ratio and sz_n2 >= min_long_body
+// === Update zones on every bar ===
+update_zones()
 
-    string n_col  = is_green(0) ? "green" : is_red(0) ? "red" : "na"
-    string n1_col = is_green(1) ? "green" : is_red(1) ? "red" : "na"
-    string n2_col = is_green(2) ? "green" : is_red(2) ? "red" : "na"
-
-    string zone_type = na
-    color  zone_color = na
-    string zone_title = na
-
-    // --- Latest table logic with ATR filter applied to all "Long" ---
-    if long_cur and n_col=="green" and n1_col=="red" and n2_col=="red" and short_n1
-        zone_type  := "Demand"
-        zone_color := color.orange
-        zone_title := "drop-base-rally"
-    else if long_cur and n_col=="green" and n1_col=="green" and n2_col=="red" and short_n1
-        zone_type  := "Demand"
-        zone_color := color.orange
-        zone_title := "drop-base-rally"
-    else if long_cur and n_col=="red" and n1_col=="green" and n2_col=="green" and short_n1
-        zone_type  := "Supply"
-        zone_color := color.blue
-        zone_title := "rally-base-drop"
-    else if long_cur and n_col=="red" and n1_col=="red" and n2_col=="green" and short_n1
-        zone_type  := "Supply"
-        zone_color := color.blue
-        zone_title := "rally-base-drop"
-    else if long_cur and n_col=="green" and n1_col=="green" and n2_col=="green" and long_n2 and short_n1
-        zone_type  := "Demand"
-        zone_color := color.orange
-        zone_title := "rally-base-rally"
-    else if long_cur and n_col=="green" and n1_col=="red" and n2_col=="green" and long_n2 and short_n1
-        zone_type  := "Demand"
-        zone_color := color.orange
-        zone_title := "rally-base-rally"
-    else if long_cur and n_col=="red" and n1_col=="red" and n2_col=="red" and long_n2 and short_n1
-        zone_type  := "Supply"
-        zone_color := color.blue
-        zone_title := "drop-base-drop"
-    else if long_cur and n_col=="red" and n1_col=="green" and n2_col=="red" and long_n2 and short_n1
-        zone_type  := "Supply"
-        zone_color := color.blue
-        zone_title := "drop-base-drop"
-
-    if not na(zone_color)
-        zone_top = high[1]
-        zone_bot = low[1]
-        b = box.new(left=bar_index-1, top=zone_top, right=bar_index-1+zone_length, bottom=zone_bot, border_color=zone_color, bgcolor=color.new(zone_color, 85))
-        array.unshift(zone_boxes, b)
-
+// === Clean up old zones (optional - keeps performance good) ===
+if array.size(active_zones) > 50
+    oldest_zone = array.pop(active_zones)
+    box.delete(oldest_zone.zone_box)
