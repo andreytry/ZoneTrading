@@ -1,0 +1,391 @@
+//@version=5
+indicator("Supply-Demand Zone Alert System", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// INPUT SETTINGS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Zone Detection Settings
+zoneLookback = input.int(20, "Zone Detection Lookback", minval=5, maxval=100)
+minMovePercent = input.float(2.0, "Minimum Move % from Zone", minval=0.5, maxval=10.0)
+maxZonesPerSide = input.int(3, "Max Zones per Side", minval=1, maxval=10)
+zoneExpireDays = input.int(30, "Zone Expire Days", minval=1, maxval=365)
+
+// Visual Settings
+showSupplyZones = input.bool(true, "Show Supply Zones")
+showDemandZones = input.bool(true, "Show Demand Zones")
+supplyColor = input.color(color.new(color.red, 80), "Supply Zone Color")
+demandColor = input.color(color.new(color.green, 80), "Demand Zone Color")
+showZoneLabels = input.bool(true, "Show Zone Labels")
+
+// Alert Settings
+enableAlerts = input.bool(true, "Enable Alerts")
+alertOnEntry = input.bool(true, "Alert on Zone Entry")
+alertOnExit = input.bool(true, "Alert on Zone Exit")
+alertOnBreak = input.bool(true, "Alert on Zone Break")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ZONE DETECTION FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate percentage move
+calcMovePercent(fromPrice, toPrice) =>
+    math.abs((toPrice - fromPrice) / fromPrice) * 100
+
+// Check if price made significant move from a zone
+checkSignificantMove(zoneHigh, zoneLow, direction) =>
+    if direction == 1  // Bullish move from demand zone
+        movePercent = calcMovePercent(zoneLow, high)
+        movePercent >= minMovePercent
+    else  // Bearish move from supply zone
+        movePercent = calcMovePercent(zoneHigh, low)
+        movePercent >= minMovePercent
+
+// Identify swing highs and lows
+isSwingHigh(lookback) =>
+    highestInRange = true
+    for i = 1 to lookback
+        if high[i] >= high or high[i+1] >= high
+            highestInRange := false
+            break
+    highestInRange
+
+isSwingLow(lookback) =>
+    lowestInRange = true
+    for i = 1 to lookback
+        if low[i] <= low or low[i+1] <= low
+            lowestInRange := false
+            break
+    lowestInRange
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ZONE STRUCTURE AND MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Zone type definition
+type Zone
+    box zoneBox
+    line zoneLine
+    label zoneLabel
+    float upperLevel
+    float lowerLevel
+    int creationBar
+    int strength
+    bool isActive
+    bool isFresh
+    string zoneType
+
+// Arrays to store zones
+var array<Zone> supplyZones = array.new<Zone>()
+var array<Zone> demandZones = array.new<Zone>()
+
+// Function to create new zone
+createZone(upperLevel, lowerLevel, zoneType, strength) =>
+    zoneColor = zoneType == "Supply" ? supplyColor : demandColor
+    
+    // Create zone box
+    zoneBox = box.new(bar_index - zoneLookback, upperLevel, bar_index + 50, lowerLevel, bgcolor=zoneColor, border_color=color.new(zoneColor, 0), border_width=1)
+    
+    // Create zone line for better visibility
+    zoneLine = line.new(bar_index - zoneLookback, (upperLevel + lowerLevel) / 2, bar_index + 50, (upperLevel + lowerLevel) / 2, color=color.new(zoneColor, 0), style=line.style_dashed, width=1)
+    
+    // Create zone label
+    var label zoneLabel = na
+    if showZoneLabels
+        labelText = zoneType + "\n★" + str.tostring(strength) + "/5"
+        zoneLabel := label.new(bar_index, upperLevel, labelText, style=label.style_label_down, color=zoneColor, textcolor=color.white, size=size.small)
+    
+    // Create and return zone object
+    Zone.new(zoneBox, zoneLine, zoneLabel, upperLevel, lowerLevel, bar_index, strength, true, true, zoneType)
+
+// Function to calculate zone strength (1-5 stars)
+calcZoneStrength(movePercent, volumeRatio, rejectionSpeed) =>
+    strength = 1
+    
+    // Move percentage scoring
+    if movePercent >= 5.0
+        strength += 2
+    else if movePercent >= 3.0
+        strength += 1
+    
+    // Volume scoring (if volume data available)
+    if not na(volume) and volumeRatio > 1.5
+        strength += 1
+    
+    // Speed scoring
+    if rejectionSpeed <= 3
+        strength += 1
+    
+    math.min(strength, 5)
+
+// Clean expired zones
+cleanExpiredZones(zoneArray) =>
+    if array.size(zoneArray) > 0
+        for i = array.size(zoneArray) - 1 to 0
+            zone = array.get(zoneArray, i)
+            if bar_index - zone.creationBar > zoneExpireDays * 24  // Assuming hourly timeframe
+                box.delete(zone.zoneBox)
+                line.delete(zone.zoneLine)
+                if not na(zone.zoneLabel)
+                    label.delete(zone.zoneLabel)
+                array.remove(zoneArray, i)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// MAIN ZONE DETECTION LOGIC
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Detect supply zones (resistance)
+if isSwingHigh(zoneLookback) and showSupplyZones
+    // Check for significant bearish move after this high
+    var bool significantMove = false
+    var int rejectionSpeed = 0
+    
+    for i = 1 to 10
+        if bar_index >= i
+            movePercent = calcMovePercent(high, low[i])
+            if movePercent >= minMovePercent
+                significantMove := true
+                rejectionSpeed := i
+                break
+    
+    if significantMove
+        // Calculate zone boundaries
+        zoneHigh = high
+        zoneLow = math.max(low, high * 0.995)  // Minimum 0.5% zone height
+        
+        // Calculate strength metrics
+        movePercent = calcMovePercent(zoneHigh, low[rejectionSpeed])
+        volumeRatio = na(volume) ? 1.0 : volume / ta.sma(volume, 20)
+        strength = calcZoneStrength(movePercent, volumeRatio, rejectionSpeed)
+        
+        // Create new supply zone
+        newZone = createZone(zoneHigh, zoneLow, "Supply", strength)
+        
+        // Add to array (limit number of zones)
+        array.unshift(supplyZones, newZone)
+        if array.size(supplyZones) > maxZonesPerSide
+            oldZone = array.pop(supplyZones)
+            box.delete(oldZone.zoneBox)
+            line.delete(oldZone.zoneLine)
+            if not na(oldZone.zoneLabel)
+                label.delete(oldZone.zoneLabel)
+
+// Detect demand zones (support)
+if isSwingLow(zoneLookback) and showDemandZones
+    // Check for significant bullish move after this low
+    var bool significantMove = false
+    var int rejectionSpeed = 0
+    
+    for i = 1 to 10
+        if bar_index >= i
+            movePercent = calcMovePercent(low, high[i])
+            if movePercent >= minMovePercent
+                significantMove := true
+                rejectionSpeed := i
+                break
+    
+    if significantMove
+        // Calculate zone boundaries
+        zoneLow = low
+        zoneHigh = math.min(high, low * 1.005)  // Minimum 0.5% zone height
+        
+        // Calculate strength metrics
+        movePercent = calcMovePercent(zoneLow, high[rejectionSpeed])
+        volumeRatio = na(volume) ? 1.0 : volume / ta.sma(volume, 20)
+        strength = calcZoneStrength(movePercent, volumeRatio, rejectionSpeed)
+        
+        // Create new demand zone
+        newZone = createZone(zoneHigh, zoneLow, "Demand", strength)
+        
+        // Add to array (limit number of zones)
+        array.unshift(demandZones, newZone)
+        if array.size(demandZones) > maxZonesPerSide
+            oldZone = array.pop(demandZones)
+            box.delete(oldZone.zoneBox)
+            line.delete(oldZone.zoneLine)
+            if not na(oldZone.zoneLabel)
+                label.delete(oldZone.zoneLabel)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ZONE INTERACTION DETECTION AND ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Check price interaction with zones
+checkZoneInteraction(zoneArray, zoneTypeName) =>
+    if enableAlerts and array.size(zoneArray) > 0
+        for i = 0 to array.size(zoneArray) - 1
+            zone = array.get(zoneArray, i)
+            if zone.isActive
+                
+                // Check if price entered zone
+                priceInZone = low <= zone.upperLevel and high >= zone.lowerLevel
+                wasInZone = low[1] <= zone.upperLevel and high[1] >= zone.lowerLevel
+                
+                // Zone entry alert
+                if priceInZone and not wasInZone and alertOnEntry
+                    alert("🎯 ZONE ENTRY: Price entered " + zoneTypeName + " zone at " + str.tostring(close, "#.####") + " | Strength: " + str.tostring(zone.strength) + "/5", alert.freq_once_per_bar)
+                    
+                    // Update zone - no longer fresh
+                    zone.isFresh := false
+                
+                // Zone exit alert
+                if not priceInZone and wasInZone and alertOnExit
+                    alert("📤 ZONE EXIT: Price exited " + zoneTypeName + " zone at " + str.tostring(close, "#.####"), alert.freq_once_per_bar)
+                
+                // Zone break alert
+                var bool zoneBreak = false
+                if zoneTypeName == "Supply" and close > zone.upperLevel and close[1] <= zone.upperLevel
+                    zoneBreak := true
+                else if zoneTypeName == "Demand" and close < zone.lowerLevel and close[1] >= zone.lowerLevel
+                    zoneBreak := true
+                
+                if zoneBreak and alertOnBreak
+                    alert("💥 ZONE BREAK: " + zoneTypeName + " zone broken at " + str.tostring(close, "#.####") + " | Consider zone invalid", alert.freq_once_per_bar)
+                    
+                    // Mark zone as inactive
+                    zone.isActive := false
+                    box.set_bgcolor(zone.zoneBox, color.new(zone.zoneType == "Supply" ? color.red : color.green, 95))
+
+// Execute zone interaction checks
+checkZoneInteraction(supplyZones, "Supply")
+checkZoneInteraction(demandZones, "Demand")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ZONE MAINTENANCE
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Clean expired zones every 24 hours
+if barstate.islast and timeframe.isintraday
+    cleanExpiredZones(supplyZones)
+    cleanExpiredZones(demandZones)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// VISUAL ENHANCEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Current price line for reference
+plot(close, "Current Price", color=color.white, linewidth=1)
+
+// Zone count display
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Active Zones", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, "Supply", text_color=color.red, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(array.size(supplyZones)), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 2, "Demand", text_color=color.green, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(array.size(demandZones)), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 3, "Price", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(close, "#.####"), text_color=color.yellow, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ZONE STRENGTH INDICATOR
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Function to draw strength stars on zones
+drawStrengthIndicator(zone) =>
+    if showZoneLabels and not na(zone.zoneLabel)
+        stars = ""
+        for i = 1 to zone.strength
+            stars += "★"
+        for i = zone.strength + 1 to 5
+            stars += "☆"
+        
+        labelText = zone.zoneType + "\n" + stars + "\n" + str.tostring(zone.strength) + "/5"
+        label.set_text(zone.zoneLabel, labelText)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ADDITIONAL FEATURES
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Highlight current candle if it's touching any zone
+var color currentCandleColor = na
+touchingSupply = false
+touchingDemand = false
+
+if array.size(supplyZones) > 0
+    for i = 0 to array.size(supplyZones) - 1
+        zone = array.get(supplyZones, i)
+        if zone.isActive and low <= zone.upperLevel and high >= zone.lowerLevel
+            touchingSupply := true
+            break
+
+if array.size(demandZones) > 0
+    for i = 0 to array.size(demandZones) - 1
+        zone = array.get(demandZones, i)
+        if zone.isActive and low <= zone.upperLevel and high >= zone.lowerLevel
+            touchingDemand := true
+            break
+
+// Set candle color based on zone interaction
+if touchingSupply and touchingDemand
+    currentCandleColor := color.purple
+else if touchingSupply
+    currentCandleColor := color.orange
+else if touchingDemand
+    currentCandleColor := color.lime
+else
+    currentCandleColor := na
+
+// Plot colored bars for zone interactions
+barcolor(currentCandleColor, title="Zone Interaction")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// General zone interaction alert
+alertcondition(touchingSupply or touchingDemand, title="Price in Zone", message="Price is interacting with Supply/Demand zone - Monitor for reversal signals")
+
+// Supply zone specific alerts
+alertcondition(touchingSupply, title="Supply Zone Touch", message="Price touched Supply zone - Watch for bearish reversal")
+
+// Demand zone specific alerts
+alertcondition(touchingDemand, title="Demand Zone Touch", message="Price touched Demand zone - Watch for bullish reversal")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// INFORMATION PANEL
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Create status panel
+var table statusPanel = table.new(position.bottom_right, 2, 3, bgcolor=color.new(color.navy, 90), border_width=1)
+
+if barstate.islast
+    // Current status
+    currentStatus = touchingSupply and touchingDemand ? "In Both Zones!" : touchingSupply ? "In Supply Zone" : touchingDemand ? "In Demand Zone" : "No Zone Contact"
+    
+    statusColor = touchingSupply and touchingDemand ? color.purple : touchingSupply ? color.red : touchingDemand ? color.green : color.gray
+    
+    table.cell(statusPanel, 0, 0, "Status:", text_color=color.white, text_size=size.small)
+    table.cell(statusPanel, 1, 0, currentStatus, text_color=statusColor, text_size=size.small)
+    
+    // Next nearest zones
+    var string nearestSupply = "None"
+    var string nearestDemand = "None"
+    
+    if array.size(supplyZones) > 0
+        zone = array.get(supplyZones, 0)
+        if zone.isActive
+            distance = ((zone.lowerLevel - close) / close) * 100
+            nearestSupply := str.tostring(distance, "#.##") + "%"
+    
+    if array.size(demandZones) > 0
+        zone = array.get(demandZones, 0)
+        if zone.isActive
+            distance = ((close - zone.upperLevel) / close) * 100
+            nearestDemand := str.tostring(distance, "#.##") + "%"
+    
+    table.cell(statusPanel, 0, 1, "Supply:", text_color=color.white, text_size=size.small)
+    table.cell(statusPanel, 1, 1, nearestSupply, text_color=color.red, text_size=size.small)
+    
+    table.cell(statusPanel, 0, 2, "Demand:", text_color=color.white, text_size=size.small)
+    table.cell(statusPanel, 1, 2, nearestDemand, text_color=color.green, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// DEBUGGING AND OPTIMIZATION
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Plot swing points for debugging (optional)
+plotchar(isSwingHigh(zoneLookback) ? high : na, "Swing High", "▼", location.abovebar, color.red, size=size.tiny)
+plotchar(isSwingLow(zoneLookback) ? low : na, "Swing Low", "▲", location.belowbar, color.green, size=size.tiny)
