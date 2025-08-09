@@ -1,0 +1,86 @@
+//@version=5 
+indicator("Supply/Demand Zones (ATR Filter, Bodies Only, Prolonged)", overlay=true, max_boxes_count=50)  
+
+// === Inputs ===
+length_ratio     = input.float(2.0, "Body Ratio (Long/Short)", step=0.1)
+zone_length      = input.int(100, "Zone Plot Length (bars)")  // kept for initial length, but will prolong
+days_back        = input.int(100, "Draw Zones For Last N Days")
+atr_length       = input.int(14, "ATR Period")
+long_atr_filter  = input.float(0.7, "Long min body as % of ATR", step=0.01)  // <-- Percentage filter param
+
+// === Helpers ===
+body_size(idx) => math.abs(close[idx] - open[idx])
+is_green(idx) => close[idx] > open[idx]
+is_red(idx)   => close[idx] < open[idx]
+
+// === ATR Calculation ===
+atr_val = ta.atr(atr_length)
+
+// === Time Filter ===
+ms_in_day   = 24 * 60 * 60 * 1000
+start_time  = timenow - days_back * ms_in_day
+in_last_days = time >= start_time
+
+// === Arrays to store boxes ===
+var box[] zone_boxes = array.new<box>()
+
+// === Pattern Logic from Latest Table, using BODIES ONLY and ATR Filter ===
+if bar_index >= 2 and in_last_days
+    float sz_cur = body_size(0)
+    float sz_n1  = body_size(1)
+    float sz_n2  = body_size(2)
+
+    float min_long_body = atr_val * long_atr_filter
+
+    bool short_n1 = sz_n1 < sz_cur / length_ratio
+    bool long_cur = sz_cur >= sz_n1 * length_ratio and sz_cur >= min_long_body
+    bool long_n2  = sz_n2 >= sz_n1 * length_ratio and sz_n2 >= min_long_body
+
+    string n_col  = is_green(0) ? "green" : is_red(0) ? "red" : "na"
+    string n1_col = is_green(1) ? "green" : is_red(1) ? "red" : "na"
+    string n2_col = is_green(2) ? "green" : is_red(2) ? "red" : "na"
+
+    string zone_type = na
+    color  zone_color = na
+    string zone_title = na
+
+    // --- Latest table logic with ATR filter applied to all "Long" ---
+    if long_cur and n_col=="green" and n1_col=="red" and n2_col=="red" and short_n1
+        zone_type  := "Demand"
+        zone_color := color.orange
+        zone_title := "drop-base-rally"
+    else if long_cur and n_col=="green" and n1_col=="green" and n2_col=="red" and short_n1
+        zone_type  := "Demand"
+        zone_color := color.orange
+        zone_title := "drop-base-rally"
+    else if long_cur and n_col=="red" and n1_col=="green" and n2_col=="green" and short_n1
+        zone_type  := "Supply"
+        zone_color := color.blue
+        zone_title := "rally-base-drop"
+    else if long_cur and n_col=="red" and n1_col=="red" and n2_col=="green" and short_n1
+        zone_type  := "Supply"
+        zone_color := color.blue
+        zone_title := "rally-base-drop"
+    else if long_cur and n_col=="green" and n1_col=="green" and n2_col=="green" and long_n2 and short_n1
+        zone_type  := "Demand"
+        zone_color := color.orange
+        zone_title := "rally-base-rally"
+    else if long_cur and n_col=="green" and n1_col=="red" and n2_col=="green" and long_n2 and short_n1
+        zone_type  := "Demand"
+        zone_color := color.orange
+        zone_title := "rally-base-rally"
+    else if long_cur and n_col=="red" and n1_col=="red" and n2_col=="red" and long_n2 and short_n1
+        zone_type  := "Supply"
+        zone_color := color.blue
+        zone_title := "drop-base-drop"
+    else if long_cur and n_col=="red" and n1_col=="green" and n2_col=="red" and long_n2 and short_n1
+        zone_type  := "Supply"
+        zone_color := color.blue
+        zone_title := "drop-base-drop"
+
+    if not na(zone_color)
+        zone_top = high[1]
+        zone_bot = low[1]
+        b = box.new(left=bar_index-1, top=zone_top, right=bar_index-1+zone_length, bottom=zone_bot, border_color=zone_color, bgcolor=color.new(zone_color, 85))
+        array.unshift(zone_boxes, b)
+
