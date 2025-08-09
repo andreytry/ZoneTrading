@@ -53,22 +53,22 @@ find_zone_boundaries(start_idx, num_small_candles, zone_type) =>
     
     if zone_type == "Demand"
         // For demand zones: top = highest close of small candles, bottom = lowest low of small candles
-        zone_top := close[start_idx]
+        zone_top := math.max(open[start_idx], close[start_idx])
         zone_bottom := low[start_idx]
         
-        for i = 1 to num_small_candles
+        for i = 0 to num_small_candles - 1
             if start_idx + i < bar_index
-                zone_top := math.max(zone_top, close[start_idx + i])
+                zone_top := math.max(zone_top, math.max(open[start_idx + i], close[start_idx + i]))
                 zone_bottom := math.min(zone_bottom, low[start_idx + i])
     else
         // For supply zones: top = highest high of small candles, bottom = lowest close of small candles  
         zone_top := high[start_idx]
-        zone_bottom := close[start_idx]
+        zone_bottom := math. min(open[start_idx], close[start_idx])
         
-        for i = 1 to num_small_candles
+        for i = 0 to num_small_candles - 1
             if start_idx + i < bar_index
                 zone_top := math.max(zone_top, high[start_idx + i])
-                zone_bottom := math.min(zone_bottom, close[start_idx + i])
+                zone_bottom := math.min(zone_bottom, math.min(open[start_idx + i], close[start_idx + i]))
     
     [zone_top, zone_bottom]
 
