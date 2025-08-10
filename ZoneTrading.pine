@@ -1,6 +1,9 @@
 //@version=5
 indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
 
+// === Constants ===
+HISTORY_LENGTH = 100
+
 // === Timeframe Configuration ===
 analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", tooltip="Timeframe to analyze for zones")
 
@@ -33,13 +36,29 @@ type ZoneData
 // === Arrays to store zone data ===
 var array<ZoneData> active_zones = array.new<ZoneData>()
 
-// === Historical data storage (HTF) ===
-var array<float> mtf_open_history  = array.new<float>()
-var array<float> mtf_high_history  = array.new<float>()
-var array<float> mtf_low_history   = array.new<float>()
-var array<float> mtf_close_history = array.new<float>()
-var array<float> mtf_atr_history   = array.new<float>()
-var array<int>   mtf_time_history  = array.new<int>()   // HTF bar times (ms)
+// === Historical data storage (60M) ===
+var array<float> mtf_open_history_60  = array.new<float>()
+var array<float> mtf_high_history_60  = array.new<float>()
+var array<float> mtf_low_history_60   = array.new<float>()
+var array<float> mtf_close_history_60 = array.new<float>()
+var array<float> mtf_atr_history_60   = array.new<float>()
+var array<int>   mtf_time_history_60  = array.new<int>()
+
+// === Historical data storage (15M) ===
+var array<float> mtf_open_history_15  = array.new<float>()
+var array<float> mtf_high_history_15  = array.new<float>()
+var array<float> mtf_low_history_15   = array.new<float>()
+var array<float> mtf_close_history_15 = array.new<float>()
+var array<float> mtf_atr_history_15   = array.new<float>()
+var array<int>   mtf_time_history_15  = array.new<int>()
+
+// === Historical data storage (Current Timeframe) ===
+var array<float> mtf_open_history_ct  = array.new<float>()
+var array<float> mtf_high_history_ct  = array.new<float>()
+var array<float> mtf_low_history_ct   = array.new<float>()
+var array<float> mtf_close_history_ct = array.new<float>()
+var array<float> mtf_atr_history_ct   = array.new<float>()
+var array<int>   mtf_time_history_ct  = array.new<int>()
 
 // === Breach check ===
 is_zone_breached(zone_data) =>
@@ -47,24 +66,25 @@ is_zone_breached(zone_data) =>
     float breach_amount = zone_height * breach_threshold
     zone_data.zone_type == "Supply" ? high > zone_data.top + breach_amount : low < zone_data.bottom - breach_amount
 
-// === Boundaries from HTF arrays ===
-find_zone_boundaries_mtf(start_idx, num_small_candles, zone_type) =>
+// === Universal boundaries function with array parameters ===
+find_zone_boundaries_universal(start_idx, num_small_candles, zone_type, open_hist, high_hist, low_hist, close_hist) =>
     float zone_top = na
     float zone_bottom = na
+    
     if zone_type == "Demand"
-        zone_top   := math.max(array.get(mtf_open_history, start_idx + 1), array.get(mtf_close_history, start_idx + 1))
-        zone_bottom:= array.get(mtf_low_history,  start_idx)
+        zone_top   := math.max(array.get(open_hist, start_idx + 1), array.get(close_hist, start_idx + 1))
+        zone_bottom:= array.get(low_hist,  start_idx)
         for i = 1 to num_small_candles
-            if start_idx + i < array.size(mtf_open_history)
-                zone_top    := math.max(zone_top, math.max(array.get(mtf_open_history, start_idx + i), array.get(mtf_close_history, start_idx + i)))
-                zone_bottom := math.min(zone_bottom, array.get(mtf_low_history,  start_idx + i))
+            if start_idx + i < array.size(open_hist)
+                zone_top    := math.max(zone_top, math.max(array.get(open_hist, start_idx + i), array.get(close_hist, start_idx + i)))
+                zone_bottom := math.min(zone_bottom, array.get(low_hist,  start_idx + i))
     else
-        zone_top   := array.get(mtf_high_history, start_idx)
-        zone_bottom:= math.min(array.get(mtf_open_history, start_idx + 1), array.get(mtf_close_history, start_idx + 1))
+        zone_top   := array.get(high_hist, start_idx)
+        zone_bottom:= math.min(array.get(open_hist, start_idx + 1), array.get(close_hist, start_idx + 1))
         for i = 1 to num_small_candles
-            if start_idx + i < array.size(mtf_open_history)
-                zone_top    := math.max(zone_top, array.get(mtf_high_history, start_idx + i))
-                zone_bottom := math.min(zone_bottom, math.min(array.get(mtf_open_history, start_idx + i), array.get(mtf_close_history, start_idx + i)))
+            if start_idx + i < array.size(open_hist)
+                zone_top    := math.max(zone_top, array.get(high_hist, start_idx + i))
+                zone_bottom := math.min(zone_bottom, math.min(array.get(open_hist, start_idx + i), array.get(close_hist, start_idx + i)))
     [zone_top, zone_bottom]
 
 // === Extend / cull ===
@@ -79,8 +99,8 @@ update_zones() =>
             // else: box has extend.right so no need to set_right each bar
             i -= 1
 
-// === MTF Pattern Detection ===
-detect_mtf_patterns(tf) =>
+// === Universal MTF Pattern Detection ===
+detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
     string actual_tf = tf == "" ? timeframe.period : tf
 
     // Pull HTF series (one value per HTF bar)
@@ -89,22 +109,22 @@ detect_mtf_patterns(tf) =>
     // Push only on NEW HTF bars (prevents intraday duplication)
     bool is_new_htf_bar = ta.change(time(actual_tf))
     if is_new_htf_bar and not na(mtf_open)
-        array.unshift(mtf_open_history,  mtf_open)
-        array.unshift(mtf_high_history,  mtf_high)
-        array.unshift(mtf_low_history,   mtf_low)
-        array.unshift(mtf_close_history, mtf_close)
-        array.unshift(mtf_atr_history,   mtf_atr)
-        array.unshift(mtf_time_history,  htf_time)
+        array.unshift(open_hist,  mtf_open)
+        array.unshift(high_hist,  mtf_high)
+        array.unshift(low_hist,   mtf_low)
+        array.unshift(close_hist, mtf_close)
+        array.unshift(atr_hist,   mtf_atr)
+        array.unshift(time_hist,  htf_time)
 
-        if array.size(mtf_open_history) > 100
-            array.pop(mtf_open_history), array.pop(mtf_high_history), array.pop(mtf_low_history), array.pop(mtf_close_history), array.pop(mtf_atr_history), array.pop(mtf_time_history)
+        if array.size(open_hist) > HISTORY_LENGTH
+            array.pop(open_hist), array.pop(high_hist), array.pop(low_hist), array.pop(close_hist), array.pop(atr_hist), array.pop(time_hist)
 
         // Pattern detection (on distinct HTF bars)
-        if array.size(mtf_open_history) >= max_small_candles + 2
-            float cur_open  = array.get(mtf_open_history,  0)
-            float cur_close = array.get(mtf_close_history, 0)
+        if array.size(open_hist) >= max_small_candles + 2
+            float cur_open  = array.get(open_hist,  0)
+            float cur_close = array.get(close_hist, 0)
             float cur_body  = body_size_mtf(cur_open, cur_close)
-            float cur_atr   = array.get(mtf_atr_history,  0)
+            float cur_atr   = array.get(atr_hist,  0)
             float min_long_body = cur_atr * long_atr_filter
 
             if cur_body >= min_long_body
@@ -115,16 +135,16 @@ detect_mtf_patterns(tf) =>
                 bool valid_pattern = false
                 int  leg_in_index = -1
 
-                while idx <= max_small_candles and idx < array.size(mtf_open_history)
-                    float s_open  = array.get(mtf_open_history,  idx)
-                    float s_close = array.get(mtf_close_history, idx)
+                while idx <= max_small_candles and idx < array.size(open_hist)
+                    float s_open  = array.get(open_hist,  idx)
+                    float s_close = array.get(close_hist, idx)
                     float s_body  = body_size_mtf(s_open, s_close)
 
                     if s_body <= cur_body * max_long_short_ratio
                         small_count += 1
                         if s_body > 0
-                            float s_high = array.get(mtf_high_history, idx)
-                            float s_low  = array.get(mtf_low_history,  idx)
+                            float s_high = array.get(high_hist, idx)
+                            float s_low  = array.get(low_hist,  idx)
                             float up_w   = s_high - math.max(s_open, s_close)
                             float dn_w   = math.min(s_open, s_close) - s_low
                             float mx_w   = math.max(up_w, dn_w)
@@ -135,8 +155,8 @@ detect_mtf_patterns(tf) =>
                         idx += 1
                     else
                         if small_count >= 1
-                            float leg_open  = array.get(mtf_open_history,  idx)
-                            float leg_close = array.get(mtf_close_history, idx)
+                            float leg_open  = array.get(open_hist,  idx)
+                            float leg_close = array.get(close_hist, idx)
                             float leg_body  = body_size_mtf(leg_open, leg_close)
                             if leg_body >= cur_body * leg_out_leg_in_ratio
                                 valid_pattern := true
@@ -144,8 +164,8 @@ detect_mtf_patterns(tf) =>
                         break
 
                 if valid_pattern and leg_in_index > 0
-                    float leg_open  = array.get(mtf_open_history,  leg_in_index)
-                    float leg_close = array.get(mtf_close_history, leg_in_index)
+                    float leg_open  = array.get(open_hist,  leg_in_index)
+                    float leg_close = array.get(close_hist, leg_in_index)
                     string leg_color = is_green_mtf(leg_open, leg_close) ? "green" : is_red_mtf(leg_open, leg_close) ? "red" : "na"
 
                     string zone_type = na, string zone_title = na
@@ -159,19 +179,19 @@ detect_mtf_patterns(tf) =>
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
                     if not na(zone_type)
-                        [zone_top, zone_bottom] = find_zone_boundaries_mtf(0, small_count, zone_type)
+                        [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
 
                         color  zone_color = zone_type == "Demand" ? color.orange : color.blue
-                        string tf_label   = actual_tf == timeframe.period ? "CT" : actual_tf
+                        string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
                         // --- Anchor by HTF time for PERFECT alignment on LTF ---
                         // The base starts at the OLDEST small candle: index `small_count`
-                        int left_time = array.get(mtf_time_history, small_count)
+                        int left_time = array.get(time_hist, small_count)
 
                         // Create the box at the HTF start time; extend right so it stays aligned automatically
-                        box new_box = box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")", text_color=zone_color, text_size=size.small)
+                        box new_box = box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")", text_color=zone_color, text_size=size.small)
 
-                        ZoneData new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, left_time, tf_label)
+                        ZoneData new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, left_time, display_tf_label)
                         array.unshift(active_zones, new_zone)
 
                         if array.size(active_zones) > max_zones
@@ -187,5 +207,7 @@ if barstate.islast
     timeframe_box := box.new(bar_index - 10, high + (high - low) * 0.1, bar_index + 10, high + (high - low) * 0.3, border_color=color.red, bgcolor=color.new(color.red, 80), text="TF: " + display_tf, text_color=color.white, text_size=size.normal)
 
 // === Main ===
-detect_mtf_patterns(analysis_timeframe)
+detect_mtf_patterns_universal(analysis_timeframe, "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
+detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
+detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
 update_zones()
