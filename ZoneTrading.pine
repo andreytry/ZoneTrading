@@ -2,7 +2,7 @@
 indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
 
 // === Constants ===
-HISTORY_LENGTH = 100
+HISTORY_LENGTH = 500
 
 // === Timeframe Configuration ===
 analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", tooltip="Timeframe to analyze for zones")
@@ -11,7 +11,7 @@ analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", to
 initial_length   = input.int(100, "Initial Zone Length (bars)")
 days_back        = input.int(100, "Draw Zones For Last N Days")
 atr_length       = input.int(14, "ATR Period")
-long_atr_filter  = input.float(0.5, "Long Current Candle min body as % of ATR", step=0.01)
+long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01)
 max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01)
 leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
 breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
@@ -198,13 +198,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             ZoneData oldest = array.pop(active_zones)
                             box.delete(oldest.zone_box)
 
-// === Display timeframe value in red box (UI helper) ===
-var box timeframe_box = na
-if barstate.islast
-    if not na(timeframe_box)
-        box.delete(timeframe_box)
-    string display_tf = analysis_timeframe == "" ? timeframe.period : analysis_timeframe
-    timeframe_box := box.new(bar_index - 10, high + (high - low) * 0.1, bar_index + 10, high + (high - low) * 0.3, border_color=color.red, bgcolor=color.new(color.red, 80), text="TF: " + display_tf, text_color=color.white, text_size=size.normal)
+// === Display timeframe value removed ===
 
 // === Main ===
 detect_mtf_patterns_universal(analysis_timeframe, "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
