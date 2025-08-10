@@ -8,8 +8,9 @@ atr_length       = input.int(14, "ATR Period")
 long_atr_filter  = input.float(0.5, "Long Current Candle min body as % of ATR", step=0.01)
 max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01)
 leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
-breach_threshold = input.float(0.0, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
+breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
+max_wick_ratio = input.float(5, "Max wick length to body ratio", step=0.01)
 
 // === Helpers ===
 body_size(idx) => math.abs(close[idx] - open[idx])
@@ -118,7 +119,7 @@ if bar_index >= max_small_candles + 2
                     upper_wick = high[check_index] - math.max(open[check_index], close[check_index])
                     lower_wick = math.min(open[check_index], close[check_index]) - low[check_index]
                     max_wick = math.max(upper_wick, lower_wick)
-                    if max_wick > check_body * 20
+                    if max_wick > check_body * max_wick_ratio
                         break  // Exit if wick filter fails
                 else
                     break  // Reject doji candles
