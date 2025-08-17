@@ -1,0 +1,17 @@
+
+
+INdicisive
+
+Body less than 50% of total range
+Decisive body more than 50% of total range
+Explosive body more than 70% of total range, small wicks
+
+
+Base - INdicisive
+Explosive  - leg_out_leg_in_ratio
+
+
+
+Legin - decisive or Explosive
+Base - one or more indicisive candles
+Legout  - one explosive candle
