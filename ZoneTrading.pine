@@ -11,12 +11,12 @@ analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", to
 initial_length   = input.int(100, "Initial Zone Length (bars)")
 days_back        = input.int(100, "Draw Zones For Last N Days")
 atr_length       = input.int(14, "ATR Period")
-long_atr_filter  = input.float(0.5, "Long Current Candle min body as % of ATR", step=0.01)
+long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01)
 max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01)
 leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
 breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
-max_wick_ratio = input.float(100, "Max wick length to body ratio", step=0.01)
+max_wick_ratio = input.float(5, "Max wick length to body ratio", step=0.01)
 max_zones = input.int(50, "Max Active Zones", minval=10, maxval=100)
 
 // === Helpers for MTF data ===
@@ -168,9 +168,10 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             // Otherwise treat as leg-in (as before)
                             valid_pattern := true
                             leg_in_index  := idx
-                            int   fail_time = array.get(time_hist, idx)
-                            float fail_y    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            //label.new(fail_time, fail_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: body >= 50% range")
+                            // label (Fail) commented out per request
+                            // int   fail_time = array.get(time_hist, idx)
+                            // float fail_y    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
+                            // label.new(fail_time, fail_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: body >= 50% range")
                             break
                         small_count += 1
                         if s_body > 0
@@ -184,20 +185,20 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                 if small_count == 0
                                     idx += 1
                                     continue
-                                // Otherwise stop and label
-                                int   fail_time2 = array.get(time_hist, idx)
-                                float fail_y2    = s_high + array.get(atr_hist, idx) * 0.10
-                                //label.new(fail_time2, fail_y2, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: wick/body > max")
+                                // Otherwise stop (label commented out)
+                                // int   fail_time2 = array.get(time_hist, idx)
+                                // float fail_y2    = s_high + array.get(atr_hist, idx) * 0.10
+                                // label.new(fail_time2, fail_y2, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: wick/body > max")
                                 break
                         else
                             // If this failed small is the FIRST small -> keep searching
                             if small_count == 0
                                 idx += 1
                                 continue
-                            // Otherwise stop and label
-                            int   fail_time3 = array.get(time_hist, idx)
-                            float fail_y3    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            //label.new(fail_time3, fail_y3, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: zero body")
+                            // Otherwise stop (label commented out)
+                            // int   fail_time3 = array.get(time_hist, idx)
+                            // float fail_y3    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
+                            // label.new(fail_time3, fail_y3, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: zero body")
                             break
                         idx += 1
                     else
@@ -209,9 +210,10 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                 valid_pattern := true
                                 leg_in_index  := idx
                             //else
-                            //    int   fail_time4 = array.get(time_hist, idx)
-                            //    float fail_y4    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            //    label.new(fail_time4, fail_y4, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: leg body < min ratio")
+                                // label (Fail) commented out per request
+                                // int   fail_time4 = array.get(time_hist, idx)
+                                // float fail_y4    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
+                                // label.new(fail_time4, fail_y4, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: leg body < min ratio")
                         break
 
                 if valid_pattern and leg_in_index > 0
@@ -229,11 +231,13 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     else if cur_color == "red"   and leg_color == "red"   // drop-base-drop
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
-                    // Label leg_in_index as OK or Zonetype NA
-                    //int   ok_time = array.get(time_hist, leg_in_index)
-                    //float ok_y    = array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.10
-                    //string ok_text = na(zone_type) ? "Zonetype NA" : "OK"
-                    //label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text=ok_text)
+                    // Label leg_in_index: show only "Zonetype NA"; "OK" label commented out per request
+                    int   ok_time = array.get(time_hist, leg_in_index)
+                    float ok_y    = array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.10
+                    if na(zone_type)
+                        label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Zonetype NA")
+                    // else
+                    //     label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="OK")
 
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
