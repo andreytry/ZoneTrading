@@ -133,10 +133,10 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                 float pad       = cur_atr * 0.05
                 float hi0       = array.get(high_hist, 0)
                 float lo0       = array.get(low_hist, 0)
-                if cur_close > cur_open
-                    label.new(mark_time, lo0 - pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.green, text="")
-                else if cur_close < cur_open
-                    label.new(mark_time, hi0 + pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.red, text="")
+                //if cur_close > cur_open
+                //    label.new(mark_time, lo0 - pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.green, text="")
+                //else if cur_close < cur_open
+                //    label.new(mark_time, hi0 + pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.red, text="")
 
             // === NEW: print cur_atr above the candle, and cur_body above that ===
             int   cur_time  = array.get(time_hist, 0)
@@ -170,7 +170,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             leg_in_index  := idx
                             int   fail_time = array.get(time_hist, idx)
                             float fail_y    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            label.new(fail_time, fail_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: body >= 50% range")
+                            //label.new(fail_time, fail_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: body >= 50% range")
                             break
                         small_count += 1
                         if s_body > 0
@@ -187,7 +187,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                 // Otherwise stop and label
                                 int   fail_time2 = array.get(time_hist, idx)
                                 float fail_y2    = s_high + array.get(atr_hist, idx) * 0.10
-                                label.new(fail_time2, fail_y2, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: wick/body > max")
+                                //label.new(fail_time2, fail_y2, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: wick/body > max")
                                 break
                         else
                             // If this failed small is the FIRST small -> keep searching
@@ -197,7 +197,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             // Otherwise stop and label
                             int   fail_time3 = array.get(time_hist, idx)
                             float fail_y3    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            label.new(fail_time3, fail_y3, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: zero body")
+                            //label.new(fail_time3, fail_y3, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: zero body")
                             break
                         idx += 1
                     else
@@ -208,10 +208,10 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             if leg_body >= cur_body * leg_out_leg_in_ratio
                                 valid_pattern := true
                                 leg_in_index  := idx
-                            else
-                                int   fail_time4 = array.get(time_hist, idx)
-                                float fail_y4    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                                label.new(fail_time4, fail_y4, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: leg body < min ratio")
+                            //else
+                            //    int   fail_time4 = array.get(time_hist, idx)
+                            //    float fail_y4    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
+                            //    label.new(fail_time4, fail_y4, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: leg body < min ratio")
                         break
 
                 if valid_pattern and leg_in_index > 0
@@ -230,10 +230,10 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
                     // Label leg_in_index as OK or Zonetype NA
-                    int   ok_time = array.get(time_hist, leg_in_index)
-                    float ok_y    = array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.10
-                    string ok_text = na(zone_type) ? "Zonetype NA" : "OK"
-                    label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text=ok_text)
+                    //int   ok_time = array.get(time_hist, leg_in_index)
+                    //float ok_y    = array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.10
+                    //string ok_text = na(zone_type) ? "Zonetype NA" : "OK"
+                    //label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text=ok_text)
 
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
