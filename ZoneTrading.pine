@@ -4,20 +4,28 @@ indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, m
 // === Constants ===
 HISTORY_LENGTH = 500
 
+// === Zones UI ===
+group_zones = "Zones"
+show_ct  = input.bool(true,  "Current Timeframe", group=group_zones)
+show_5   = input.bool(true,  "M5",                group=group_zones, inline="ZSEL")
+show_15  = input.bool(true,  "M15",               group=group_zones, inline="ZSEL")
+show_60  = input.bool(true,  "M60",               group=group_zones, inline="ZSEL")
+
 // === Timeframe Configuration ===
 analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", tooltip="Timeframe to analyze for zones")
 
-// === Inputs ===
-initial_length   = input.int(100, "Initial Zone Length (bars)")
-days_back        = input.int(100, "Draw Zones For Last N Days")
-atr_length       = input.int(14, "ATR Period")
-long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01)
-max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01)
-leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
-breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
-max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
-max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01)
-max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100)
+// === Inputs (UI Settings) ===
+group_params = "Detection Settings"
+initial_length   = input.int(100, "Initial Zone Length (bars)",            group=group_params)
+days_back        = input.int(100, "Draw Zones For Last N Days",            group=group_params)
+atr_length       = input.int(14,  "ATR Period",                            group=group_params)
+long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01, group=group_params)
+max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01, group=group_params)
+leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01, group=group_params)
+breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached", group=group_params)
+max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50, group=group_params)
+max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01, group=group_params)
+max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100, group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -270,8 +278,13 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 // === Display timeframe value removed ===
 
 // === Main ===
-detect_mtf_patterns_universal(analysis_timeframe, "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
-detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
-detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)    // 5M analysis
-//detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+if show_60
+    detect_mtf_patterns_universal("60", "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
+if show_15
+    detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
+if show_5
+    detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)    // 5M analysis
+if show_ct
+    detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+
 update_zones()
