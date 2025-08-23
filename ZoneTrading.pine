@@ -16,8 +16,8 @@ max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles"
 leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
 breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
-max_wick_ratio = input.float(5, "Max wick length to body ratio", step=0.01)
-max_zones = input.int(50, "Max Active Zones", minval=10, maxval=100)
+max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01)
+max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
