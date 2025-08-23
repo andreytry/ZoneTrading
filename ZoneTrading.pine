@@ -52,6 +52,14 @@ var array<float> mtf_close_history_15 = array.new<float>()
 var array<float> mtf_atr_history_15   = array.new<float>()
 var array<int>   mtf_time_history_15  = array.new<int>()
 
+// === Historical data storage (5M) ===
+var array<float> mtf_open_history_5  = array.new<float>()
+var array<float> mtf_high_history_5  = array.new<float>()
+var array<float> mtf_low_history_5   = array.new<float>()
+var array<float> mtf_close_history_5 = array.new<float>()
+var array<float> mtf_atr_history_5   = array.new<float>()
+var array<int>   mtf_time_history_5  = array.new<int>()
+
 // === Historical data storage (Current Timeframe) ===
 var array<float> mtf_open_history_ct  = array.new<float>()
 var array<float> mtf_high_history_ct  = array.new<float>()
@@ -264,5 +272,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 // === Main ===
 detect_mtf_patterns_universal(analysis_timeframe, "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
 detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
-detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)    // 5M analysis
+//detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
 update_zones()
