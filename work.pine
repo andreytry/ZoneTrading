@@ -4,20 +4,28 @@ indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, m
 // === Constants ===
 HISTORY_LENGTH = 500
 
+// === Zones UI ===
+group_zones = "Zones"
+show_ct  = input.bool(true,  "Current Timeframe", group=group_zones)
+show_5   = input.bool(true,  "M5",                group=group_zones, inline="ZSEL")
+show_15  = input.bool(true,  "M15",               group=group_zones, inline="ZSEL")
+show_60  = input.bool(true,  "M60",               group=group_zones, inline="ZSEL")
+
 // === Timeframe Configuration ===
 analysis_timeframe = input.timeframe(defval="60", title="Analysis Timeframe", tooltip="Timeframe to analyze for zones")
 
-// === Inputs ===
-initial_length   = input.int(100, "Initial Zone Length (bars)")
-days_back        = input.int(100, "Draw Zones For Last N Days")
-atr_length       = input.int(14, "ATR Period")
-long_atr_filter  = input.float(0.5, "Long Current Candle min body as % of ATR", step=0.01)
-max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01)
-leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01)
-breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached")
-max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50)
-max_wick_ratio = input.float(100, "Max wick length to body ratio", step=0.01)
-max_zones = input.int(50, "Max Active Zones", minval=10, maxval=100)
+// === Inputs (UI Settings) ===
+group_params = "Detection Settings"
+initial_length   = input.int(100, "Initial Zone Length (bars)",            group=group_params)
+days_back        = input.int(100, "Draw Zones For Last N Days",            group=group_params)
+atr_length       = input.int(14,  "ATR Period",                            group=group_params)
+long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01, group=group_params)
+max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01, group=group_params)
+leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01, group=group_params)
+breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached", group=group_params)
+max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50, group=group_params)
+max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01, group=group_params)
+max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100, group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -51,6 +59,14 @@ var array<float> mtf_low_history_15   = array.new<float>()
 var array<float> mtf_close_history_15 = array.new<float>()
 var array<float> mtf_atr_history_15   = array.new<float>()
 var array<int>   mtf_time_history_15  = array.new<int>()
+
+// === Historical data storage (5M) ===
+var array<float> mtf_open_history_5  = array.new<float>()
+var array<float> mtf_high_history_5  = array.new<float>()
+var array<float> mtf_low_history_5   = array.new<float>()
+var array<float> mtf_close_history_5 = array.new<float>()
+var array<float> mtf_atr_history_5   = array.new<float>()
+var array<int>   mtf_time_history_5  = array.new<int>()
 
 // === Historical data storage (Current Timeframe) ===
 var array<float> mtf_open_history_ct  = array.new<float>()
@@ -127,24 +143,19 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
             float cur_atr   = array.get(atr_hist,  0)
             float min_long_body = cur_atr * long_atr_filter
 
-            // === NEW: mark all qualifying candles with smallest circle ===
+            //Check if this is a strong LEGOUT
             if cur_body >= min_long_body
+
+                // Found a LEGOUT mark with circle            
                 int   mark_time = array.get(time_hist, 0)
                 float pad       = cur_atr * 0.05
                 float hi0       = array.get(high_hist, 0)
                 float lo0       = array.get(low_hist, 0)
-                if cur_close > cur_open
-                    label.new(mark_time, lo0 - pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.green, text="")
-                else if cur_close < cur_open
-                    label.new(mark_time, hi0 + pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.red, text="")
+                //if cur_close > cur_open
+                //    label.new(mark_time, lo0 - pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.green, text="")
+                //else if cur_close < cur_open
+                //    label.new(mark_time, hi0 + pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.red, text="")
 
-            // === NEW: print cur_atr above the candle, and cur_body above that ===
-            int   cur_time  = array.get(time_hist, 0)
-            float cur_high  = array.get(high_hist, 0)
-            float off       = cur_atr * 0.15
-            //label.new(cur_time, cur_high + off,     xloc=xloc.bar_time, style=label.style_label_down, size=size.small, text=str.tostring(cur_atr,  format.mintick) + " " + str.tostring(cur_body, format.mintick))
-
-            if cur_body >= min_long_body
                 string cur_color = is_green_mtf(cur_open, cur_close) ? "green" : is_red_mtf(cur_open, cur_close) ? "red" : "na"
 
                 int small_count = 0
@@ -152,67 +163,48 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                 bool valid_pattern = false
                 int  leg_in_index = -1
 
+                // === LOOP (leg-in check first, then small validation; no fallback) ===
                 while idx <= max_small_candles and idx < array.size(open_hist)
                     float s_open  = array.get(open_hist,  idx)
                     float s_close = array.get(close_hist, idx)
                     float s_body  = body_size_mtf(s_open, s_close)
 
-                    if s_body <= cur_body * max_long_short_ratio
-                        // NEW: require each small candle's body < 50% of its total range
-                        float s_total = array.get(high_hist, idx) - array.get(low_hist, idx)
-                        if s_total > 0 and (s_body / s_total) >= 0.5
-                            // If this failed small is the FIRST small (no short candles yet) -> keep searching
-                            if small_count == 0
-                                idx += 1
-                                continue
-                            // Otherwise treat as leg-in (as before)
+                    // If we already have at least one valid small, check for big leg-in first
+                    if small_count >= 1
+                        float leg_open  = array.get(open_hist,  idx)
+                        float leg_close = array.get(close_hist, idx)
+                        float leg_body  = body_size_mtf(leg_open, leg_close)
+                        if leg_body >= cur_body * leg_out_leg_in_ratio
                             valid_pattern := true
                             leg_in_index  := idx
-                            int   fail_time = array.get(time_hist, idx)
-                            float fail_y    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            label.new(fail_time, fail_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: body >= 50% range")
+                            // LEGIN found - mark it
+                            //label.new(array.get(time_hist, idx), array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.05, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.yellow, text="")
                             break
+
+                    // If no leg-in, validate current candle as a "small"
+                    float s_high  = array.get(high_hist, idx)
+                    float s_low   = array.get(low_hist,  idx)
+                    float up_w    = s_high - math.max(s_open, s_close)
+                    float dn_w    = math.min(s_open, s_close) - s_low
+                    float mx_w    = math.max(up_w, dn_w)
+
+                    bool wick_ok  = (s_body > 0) and (mx_w <= s_body * max_wick_ratio)
+                    bool size_ok  = (s_body <= cur_body * max_long_short_ratio)
+
+                    if wick_ok and size_ok
                         small_count += 1
-                        if s_body > 0
-                            float s_high = array.get(high_hist, idx)
-                            float s_low  = array.get(low_hist,  idx)
-                            float up_w   = s_high - math.max(s_open, s_close)
-                            float dn_w   = math.min(s_open, s_close) - s_low
-                            float mx_w   = math.max(up_w, dn_w)
-                            if mx_w > s_body * max_wick_ratio
-                                // If this failed small is the FIRST small -> keep searching
-                                if small_count == 0
-                                    idx += 1
-                                    continue
-                                // Otherwise stop and label
-                                int   fail_time2 = array.get(time_hist, idx)
-                                float fail_y2    = s_high + array.get(atr_hist, idx) * 0.10
-                                label.new(fail_time2, fail_y2, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: wick/body > max")
-                                break
-                        else
-                            // If this failed small is the FIRST small -> keep searching
-                            if small_count == 0
-                                idx += 1
-                                continue
-                            // Otherwise stop and label
-                            int   fail_time3 = array.get(time_hist, idx)
-                            float fail_y3    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                            label.new(fail_time3, fail_y3, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: zero body")
-                            break
                         idx += 1
+                        continue
                     else
-                        if small_count >= 1
-                            float leg_open  = array.get(open_hist,  idx)
-                            float leg_close = array.get(close_hist, idx)
-                            float leg_body  = body_size_mtf(leg_open, leg_close)
-                            if leg_body >= cur_body * leg_out_leg_in_ratio
-                                valid_pattern := true
-                                leg_in_index  := idx
-                            else
-                                int   fail_time4 = array.get(time_hist, idx)
-                                float fail_y4    = array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.10
-                                label.new(fail_time4, fail_y4, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text="Fail: leg body < min ratio")
+                        // Invalid small -> stop searching (no fallback leg-in)
                         break
+
+                // === If ALL small candles checked were valid, accept the zone and mark it ===
+                if not valid_pattern and small_count >= 1
+                    int idx_candidate = math.min(idx, array.size(open_hist) - 1)
+                    valid_pattern := true
+                    leg_in_index  := idx_candidate
+                    //label.new(array.get(time_hist, leg_in_index), array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.05, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.yellow, text="")
 
                 if valid_pattern and leg_in_index > 0
                     float leg_open  = array.get(open_hist,  leg_in_index)
@@ -229,11 +221,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     else if cur_color == "red"   and leg_color == "red"   // drop-base-drop
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
-                    // Label leg_in_index as OK or Zonetype NA
-                    int   ok_time = array.get(time_hist, leg_in_index)
-                    float ok_y    = array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.10
-                    string ok_text = na(zone_type) ? "Zonetype NA" : "OK"
-                    label.new(ok_time, ok_y, xloc=xloc.bar_time, style=label.style_label_down, size=size.normal, color=color.black, textcolor=color.white, text=ok_text)
+                    // Label leg_in_index removed per your earlier preference
 
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
@@ -258,7 +246,13 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 // === Display timeframe value removed ===
 
 // === Main ===
-detect_mtf_patterns_universal(analysis_timeframe, "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
-detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
-detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+if show_60
+    detect_mtf_patterns_universal("60", "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
+if show_15
+    detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
+if show_5
+    detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)    // 5M analysis
+if show_ct
+    detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+
 update_zones()
