@@ -26,6 +26,8 @@ breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50, group=group_params)
 max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01, group=group_params)
 max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100, group=group_params)
+// === NEW: Distance filter multiplier ===
+range_mult = input.float(1.5, "Zone distance filter (× Daily Range)", step=0.1, group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -75,6 +77,10 @@ var array<float> mtf_low_history_ct   = array.new<float>()
 var array<float> mtf_close_history_ct = array.new<float>()
 var array<float> mtf_atr_history_ct   = array.new<float>()
 var array<int>   mtf_time_history_ct  = array.new<int>()
+
+// === Daily range (computed OUTSIDE loops/conditionals) ===
+[dHighD, dLowD] = request.security(syminfo.tickerid, "D", [high, low], lookahead=barmerge.lookahead_off)
+daily_range = dHighD - dLowD
 
 // === Breach check ===
 is_zone_breached(zone_data) =>
@@ -177,8 +183,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         if leg_body >= cur_body * leg_out_leg_in_ratio
                             valid_pattern := true
                             leg_in_index  := idx
-                            // LEGIN found - mark it
-                            //label.new(array.get(time_hist, idx), array.get(high_hist, idx) + array.get(atr_hist, idx) * 0.05, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.yellow, text="")
                             break
 
                     // If no leg-in, validate current candle as a "small"
@@ -204,7 +208,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     int idx_candidate = math.min(idx, array.size(open_hist) - 1)
                     valid_pattern := true
                     leg_in_index  := idx_candidate
-                    //label.new(array.get(time_hist, leg_in_index), array.get(high_hist, leg_in_index) + array.get(atr_hist, leg_in_index) * 0.05, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.yellow, text="")
 
                 if valid_pattern and leg_in_index > 0
                     float leg_open  = array.get(open_hist,  leg_in_index)
@@ -221,27 +224,33 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     else if cur_color == "red"   and leg_color == "red"   // drop-base-drop
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
-                    // Label leg_in_index removed per your earlier preference
-
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
 
-                        color  zone_color = zone_type == "Demand" ? color.orange : color.blue
-                        string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
+                        // === RANGE FILTER (uses precomputed daily_range; OUTSIDE loop) ===
+                        float zone_mid  = (zone_top + zone_bottom) * 0.5
+                        float denom    = math.max(daily_range, syminfo.mintick)  // avoid div-by-zero
+                        float normDist = math.abs(close - zone_mid) / denom
+                        bool  in_range = normDist <= range_mult
 
-                        // --- Anchor by HTF time for PERFECT alignment on LTF ---
-                        // The base starts at the OLDEST small candle: index `small_count`
-                        int left_time = array.get(time_hist, small_count)
 
-                        // Create the box at the HTF start time; extend right so it stays aligned automatically
-                        box new_box = box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")", text_color=zone_color, text_size=size.small)
+                        if in_range
+                            color  zone_color = zone_type == "Demand" ? color.orange : color.blue
+                            string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
-                        ZoneData new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, left_time, display_tf_label)
-                        array.unshift(active_zones, new_zone)
+                            // --- Anchor by HTF time for PERFECT alignment on LTF ---
+                            // The base starts at the OLDEST small candle: index `small_count`
+                            int left_time = array.get(time_hist, small_count)
 
-                        if array.size(active_zones) > max_zones
-                            ZoneData oldest = array.pop(active_zones)
-                            box.delete(oldest.zone_box)
+                            // Create the box at the HTF start time; extend right so it stays aligned automatically
+                            box new_box = box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")", text_color=zone_color, text_size=size.small)
+
+                            ZoneData new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, left_time, display_tf_label)
+                            array.unshift(active_zones, new_zone)
+
+                            if array.size(active_zones) > max_zones
+                                ZoneData oldest = array.pop(active_zones)
+                                box.delete(oldest.zone_box)
 
 // === Display timeframe value removed ===
 
