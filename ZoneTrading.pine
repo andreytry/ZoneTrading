@@ -26,7 +26,7 @@ breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50, group=group_params)
 max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01, group=group_params)
 max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100, group=group_params)
-// === NEW: Distance filter multiplier ===
+// Distance filter multiplier (× Daily Range)
 range_mult = input.float(1.5, "Zone distance filter (× Daily Range)", step=0.1, group=group_params)
 
 // === Helpers for MTF data ===
@@ -40,8 +40,10 @@ type ZoneData
     float top
     float bottom
     string zone_type
-    int   creation_bar_time   // store time (ms) since we anchor by bar_time
+    int   creation_bar_time
     string tf_label
+    string label_text
+    int   small_cnt
 
 // === Arrays to store zone data ===
 var array<ZoneData> active_zones = array.new<ZoneData>()
@@ -82,6 +84,13 @@ var array<int>   mtf_time_history_ct  = array.new<int>()
 [dHighD, dLowD] = request.security(syminfo.tickerid, "D", [high, low], lookahead=barmerge.lookahead_off)
 daily_range = dHighD - dLowD
 
+// Helper: current-range check (keeps same logic you had)
+is_zone_in_range(_top, _bottom) =>
+    float mid   = (_top + _bottom) * 0.5
+    float denom = math.max(daily_range, syminfo.mintick)
+    float norm  = math.abs(close - mid) / denom
+    norm <= range_mult
+
 // === Breach check ===
 is_zone_breached(zone_data) =>
     float zone_height   = zone_data.top - zone_data.bottom
@@ -109,16 +118,43 @@ find_zone_boundaries_universal(start_idx, num_small_candles, zone_type, open_his
                 zone_bottom := math.min(zone_bottom, math.min(array.get(open_hist, start_idx + i), array.get(close_hist, start_idx + i)))
     [zone_top, zone_bottom]
 
-// === Extend / cull ===
+// === Extend / cull + RANGE TOGGLING ===
 update_zones() =>
     if array.size(active_zones) > 0
         int i = array.size(active_zones) - 1
         while i >= 0
             ZoneData z = array.get(active_zones, i)
+
+            // 1) Hard breach => remove zone entirely
             if is_zone_breached(z)
-                box.delete(z.zone_box)
+                if not na(z.zone_box)
+                    box.delete(z.zone_box)
                 array.remove(active_zones, i)
-            // else: box has extend.right so no need to set_right each bar
+                i -= 1
+                continue
+
+            // 2) Toggle visibility by current range
+            bool in_range_now = is_zone_in_range(z.top, z.bottom)
+
+            // If back in range and no box drawn -> (re)create it
+            if in_range_now and na(z.zone_box)
+                color zone_color = z.zone_type == "Demand" ? color.orange : color.blue
+                box bx = box.new(
+                     z.creation_bar_time, z.top,
+                     z.creation_bar_time, z.bottom,
+                     xloc=xloc.bar_time, extend=extend.right,
+                     border_color=zone_color, bgcolor=color.new(zone_color, 85),
+                     text=z.label_text, text_color=zone_color, text_size=size.small)
+                // write back updated struct with new box handle
+                ZoneData z2 = ZoneData.new(bx, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt)
+                array.set(active_zones, i, z2)
+
+            // If out of range and box exists -> delete box (keep zone)
+            if (not in_range_now) and not na(z.zone_box)
+                box.delete(z.zone_box)
+                ZoneData z3 = ZoneData.new(na, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt)
+                array.set(active_zones, i, z3)
+
             i -= 1
 
 // === Universal MTF Pattern Detection ===
@@ -152,7 +188,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
             //Check if this is a strong LEGOUT
             if cur_body >= min_long_body
 
-                // Found a LEGOUT mark with circle            
+                // Found a LEGOUT mark with circle (kept commented per base)
                 int   mark_time = array.get(time_hist, 0)
                 float pad       = cur_atr * 0.05
                 float hi0       = array.get(high_hist, 0)
@@ -169,7 +205,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                 bool valid_pattern = false
                 int  leg_in_index = -1
 
-                // === LOOP (leg-in check first, then small validation; no fallback) ===
+                // LOOP (leg-in check first, then small validation; no fallback)
                 while idx <= max_small_candles and idx < array.size(open_hist)
                     float s_open  = array.get(open_hist,  idx)
                     float s_close = array.get(close_hist, idx)
@@ -203,7 +239,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         // Invalid small -> stop searching (no fallback leg-in)
                         break
 
-                // === If ALL small candles checked were valid, accept the zone and mark it ===
+                // If ALL small candles checked were valid, accept the zone and mark it
                 if not valid_pattern and small_count >= 1
                     int idx_candidate = math.min(idx, array.size(open_hist) - 1)
                     valid_pattern := true
@@ -227,32 +263,29 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
 
-                        // === RANGE FILTER (uses precomputed daily_range; OUTSIDE loop) ===
-                        float zone_mid  = (zone_top + zone_bottom) * 0.5
-                        float denom    = math.max(daily_range, syminfo.mintick)  // avoid div-by-zero
-                        float normDist = math.abs(close - zone_mid) / denom
-                        bool  in_range = normDist <= range_mult
+                        color  zone_color = zone_type == "Demand" ? color.orange : color.blue
+                        string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
+                        // Anchor by HTF time
+                        int left_time = array.get(time_hist, small_count)
 
-                        if in_range
-                            color  zone_color = zone_type == "Demand" ? color.orange : color.blue
-                            string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
+                        // Store zone ALWAYS; draw box now only if within range
+                        string label_txt = display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")"
+                        bool   draw_now  = is_zone_in_range(zone_top, zone_bottom)
 
-                            // --- Anchor by HTF time for PERFECT alignment on LTF ---
-                            // The base starts at the OLDEST small candle: index `small_count`
-                            int left_time = array.get(time_hist, small_count)
+                        box bx = na
+                        if draw_now
+                            bx := box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right,
+                                          border_color=zone_color, bgcolor=color.new(zone_color, 85),
+                                          text=label_txt, text_color=zone_color, text_size=size.small)
 
-                            // Create the box at the HTF start time; extend right so it stays aligned automatically
-                            box new_box = box.new(left_time, zone_top, left_time, zone_bottom, xloc=xloc.bar_time, extend=extend.right, border_color=zone_color, bgcolor=color.new(zone_color, 85), text=display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")", text_color=zone_color, text_size=size.small)
+                        ZoneData new_zone = ZoneData.new(bx, zone_top, zone_bottom, zone_type, left_time, display_tf_label, label_txt, small_count)
+                        array.unshift(active_zones, new_zone)
 
-                            ZoneData new_zone = ZoneData.new(new_box, zone_top, zone_bottom, zone_type, left_time, display_tf_label)
-                            array.unshift(active_zones, new_zone)
-
-                            if array.size(active_zones) > max_zones
-                                ZoneData oldest = array.pop(active_zones)
+                        if array.size(active_zones) > max_zones
+                            ZoneData oldest = array.pop(active_zones)
+                            if not na(oldest.zone_box)
                                 box.delete(oldest.zone_box)
-
-// === Display timeframe value removed ===
 
 // === Main ===
 if show_60
