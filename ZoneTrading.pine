@@ -22,12 +22,12 @@ atr_length       = input.int(14,  "ATR Period",                            group
 long_atr_filter  = input.float(0.8, "Long Current Candle min body as % of ATR", step=0.01, group=group_params)
 max_long_short_ratio = input.float(0.5, "Max Long/Short Ratio for small candles", step=0.01, group=group_params)
 leg_out_leg_in_ratio = input.float(0.25, "Leg Out/Leg In Ratio", step=0.01, group=group_params)
-breach_threshold = input.float(0.5, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached", group=group_params)
+breach_threshold = input.float(0.25, "Breach Threshold (% of zone height)", step=0.1, tooltip="How much price must penetrate zone to consider it breached", group=group_params)
 max_small_candles = input.int(10, "Max Small Candles in Zone", minval=1, maxval=50, group=group_params)
 max_wick_ratio = input.float(10, "Max wick length to body ratio", step=0.01, group=group_params)
-max_zones = input.int(100, "Max Active Zones", minval=10, maxval=100, group=group_params)
+max_zones = input.int(200, "Max Active Zones", minval=10, maxval=200, group=group_params)
 // Distance filter multiplier (× Daily Range)
-range_mult = input.float(1.5, "Zone distance filter (× Daily Range)", step=0.1, group=group_params)
+range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1, group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
