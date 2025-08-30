@@ -1,5 +1,42 @@
+TI-2 - duplicate zones removal
 Update the code
 If two zones of the same timeframe overlap,leave only the earliest one i.e. the one that has the earliest leg-in remove the others
+
 Mark code with the user story TI-2
+No other changes to the code!!!Never change the name of the indicator!!!
+
+
+TI-5 Nested zone strategy
+
+/*
+Update the code
+Once the pice comes to a zone, check if the zone is within another zone of the same type (supply or demand respectively). 
+If yes , then 
+    If demand zone - take long, stoploss below the zone at 30% of the zone height. TP at the nearest supply zone above but not closer than 1R
+    If supply zone - take short, stoploss above the zone at 30% of the zone height. TP at the nearest demand zone below but not closer than 1R
+
+Mark code with the user story TI-5
+No other changes to the code!!!Never change the name of the indicator!!!
+
+
+*/
+
+Update the code
+convert the indicator to a strategy
+Once the pice arrives to a zone, check if the zone is within another zone of the same type (supply or demand respectively).
+Arrives means: the candle crosses the zone boundary 
+for demand the candle high is outside the zone and low is inside the Zone
+for supply the candle low is outside the zone and the high is inside the zone
+
+If yes , then 
+    If demand zone - take long, stoploss below the zone at 30% of the zone height. TP at 2R
+    If supply zone - take short, stoploss above the zone at 30% of the zone height. TP at 2R
+
+Dont make any labels, generate a buy or sell order. 
+Also generate alert on entry with the text: "Price entered a nested supply/demand zone"
+
+Change teh code below
+Mark changes with the user story ID TI-5
 No other changes to the code!!!
 Never change the name of the indicator!!!
+
