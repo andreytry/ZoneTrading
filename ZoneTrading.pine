@@ -118,6 +118,11 @@ find_zone_boundaries_universal(start_idx, num_small_candles, zone_type, open_his
                 zone_bottom := math.min(zone_bottom, math.min(array.get(open_hist, start_idx + i), array.get(close_hist, start_idx + i)))
     [zone_top, zone_bottom]
 
+// === TI-2: Overlap detection helper (same timeframe) ===
+ti2_overlap(z1, z2) =>
+    // Overlap if price intervals intersect
+    not (z1.bottom > z2.top or z2.bottom > z1.top)
+
 // === Extend / cull + RANGE TOGGLING ===
 update_zones() =>
     if array.size(active_zones) > 0
@@ -156,6 +161,34 @@ update_zones() =>
                 array.set(active_zones, i, z3)
 
             i -= 1
+
+// === TI-2: Overlap culling pass — keep earliest zone (earliest creation_bar_time) per timeframe ===
+ti2_cull_overlaps_same_tf() =>
+    int i = 0
+    while i < array.size(active_zones)
+        ZoneData zi = array.get(active_zones, i)
+        int j = i + 1
+        while j < array.size(active_zones)
+            ZoneData zj = array.get(active_zones, j)
+            if zi.tf_label == zj.tf_label and ti2_overlap(zi, zj)
+                // keep the earliest (smaller creation_bar_time); remove the newer
+                bool keep_i = zi.creation_bar_time <= zj.creation_bar_time
+                int remove_index = keep_i ? j : i
+                ZoneData zr = array.get(active_zones, remove_index)
+                if not na(zr.zone_box)
+                    box.delete(zr.zone_box)
+                array.remove(active_zones, remove_index)
+                // if we removed i, refresh zi and reset j
+                if not keep_i
+                    if i < array.size(active_zones)
+                        zi := array.get(active_zones, i)
+                    j := i + 1
+                    continue
+                // removed j; continue comparing zi with the new element at j
+                continue
+            else
+                j += 1
+        i += 1
 
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
@@ -286,6 +319,9 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             ZoneData oldest = array.pop(active_zones)
                             if not na(oldest.zone_box)
                                 box.delete(oldest.zone_box)
+
+                        // === TI-2: After adding a zone, cull overlaps (same timeframe -> keep earliest) ===
+                        ti2_cull_overlaps_same_tf()
 
 // === Main ===
 if show_60

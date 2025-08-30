@@ -1,0 +1,5 @@
+Update the code
+If two zones of the same timeframe overlap,leave only the earliest one i.e. the one that has the earliest leg-in remove the others
+Mark code with the user story TI-2
+No other changes to the code!!!
+Never change the name of the indicator!!!
