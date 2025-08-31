@@ -36,8 +36,8 @@ is_green_mtf(_open, _close)  => _close > _open
 is_red_mtf(_open, _close)    => _close < _open
 
 // === TI-6: Simple trend filter (EMA 50/200)
-ema_fast = ta.ema(close, 20)
-ema_slow = ta.ema(close, 50)
+ema_fast = ta.ema(close, 5)
+ema_slow = ta.ema(close, 20)
 uptrend  = ema_fast > ema_slow
 downtrend= ema_fast < ema_slow
 
