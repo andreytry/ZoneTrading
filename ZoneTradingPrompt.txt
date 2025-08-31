@@ -40,3 +40,66 @@ Mark changes with the user story ID TI-5
 No other changes to the code!!!
 Never change the name of the indicator!!!
 
+===================================================================
+/*
+//TI-6 - Retracement to the zone within trend strategy
+
+Update the code
+convert the indicator to a strategy
+
+If there is a downtrend 
+and the price revisits a supply zone, meaning a green candle has (high is above  the zone and close below or within the zone) OR (close within the zone)
+then 
+    enter short,
+    SL above the zone at 30% of the zone height
+    TP at 2R
+  
+If there is an uptrend 
+and the price revisits a demand zone, meaning a red candle has (low is below  the zone and close above or within the zone) OR (close within the zone)
+then 
+    enter long,
+    SL below the zone at 30% of the zone height
+    TP at 2R
+
+Dont make any labels, generate a buy or sell order. 
+Also generate alert on entry with the text: "Price retraced to a zone"
+
+Use the code below as teh starting point!!!
+Mark changes with the user story ID TI-6
+No other changes to the code!!!
+Never change the name of the indicator!!!
+*/
+
+
+//TI-6 - Retracement to the zone within trend strategy
+
+Update the code
+convert the indicator to a strategy
+
+If there is a downtrend 
+and the price revisits a supply zone, meaning a green candle has high or close within the zone
+then 
+    enter short,
+    SL above the zone at 30% of the zone height
+    TP at 2R
+  
+If there is an uptrend 
+and the price revisits a demand zone, meaning a red candle has low or close within the zone
+then 
+    enter long,
+    SL below the zone at 30% of the zone height
+    TP at 2R
+
+Evaluate revisiting the zones only for the candles on the current timeframe but take in consideration zones on all relevant timeframes
+Make sure the entries are generated only when the price touches the zone or closes inside the zone. 
+Entries outside the zone are not allowed!!!!
+
+Dont make any labels, generate a buy or sell order. 
+Also generate alert on entry with the text: "Price retraced to a zone"
+
+Use the code below as teh starting point!!!
+Mark changes with the user story ID TI-6
+No other changes to the code!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!

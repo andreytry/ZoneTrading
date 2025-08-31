@@ -1,5 +1,5 @@
-//@version=5 
-// TI-5: switched to strategy() to allow order generation; kept title identical as requested.
+//@version=5
+// === TI-6: convert indicator() -> strategy() but KEEP THE SAME NAME ===
 strategy("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
 
 // === Constants ===
@@ -34,6 +34,27 @@ range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1,
 body_size_mtf(_open, _close) => math.abs(_close - _open)
 is_green_mtf(_open, _close)  => _close > _open
 is_red_mtf(_open, _close)    => _close < _open
+
+// === TI-6: Simple trend filter (EMA 50/200)
+ema_fast = ta.ema(close, 20)
+ema_slow = ta.ema(close, 50)
+uptrend  = ema_fast > ema_slow
+downtrend= ema_fast < ema_slow
+
+// === TI-6: Consecutive opposite candles tracker (current TF, global)
+var int consecBull = 0
+var int consecBear = 0
+bool bullBar = close > open
+bool bearBar = close < open
+if bullBar
+    consecBull := nz(consecBull[1]) + 1
+    consecBear := 0
+else if bearBar
+    consecBear := nz(consecBear[1]) + 1
+    consecBull := 0
+else
+    consecBull := 0
+    consecBear := 0
 
 // === Zone tracking type ===
 type ZoneData
@@ -92,6 +113,10 @@ is_zone_in_range(_top, _bottom) =>
     float norm  = math.abs(close - mid) / denom
     norm <= range_mult
 
+// === TI-6: "Within zone" helper
+within(_val, _top, _bot) =>
+    _val >= _bot and _val <= _top
+
 // === Breach check ===
 is_zone_breached(zone_data) =>
     float zone_height   = zone_data.top - zone_data.bottom
@@ -121,7 +146,6 @@ find_zone_boundaries_universal(start_idx, num_small_candles, zone_type, open_his
 
 // === TI-2: Overlap detection helper (same timeframe) ===
 ti2_overlap(z1, z2) =>
-    // Overlap if price intervals intersect
     not (z1.bottom > z2.top or z2.bottom > z1.top)
 
 // === Extend / cull + RANGE TOGGLING ===
@@ -151,7 +175,6 @@ update_zones() =>
                      xloc=xloc.bar_time, extend=extend.right,
                      border_color=zone_color, bgcolor=color.new(zone_color, 85),
                      text=z.label_text, text_color=zone_color, text_size=size.small)
-                // write back updated struct with new box handle
                 ZoneData z2 = ZoneData.new(bx, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt)
                 array.set(active_zones, i, z2)
 
@@ -160,53 +183,6 @@ update_zones() =>
                 box.delete(z.zone_box)
                 ZoneData z3 = ZoneData.new(na, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt)
                 array.set(active_zones, i, z3)
-
-            // === TI-5: Orders & alert when price ARRIVES to a zone that is NESTED inside another zone of the SAME TYPE ===
-            // ARRIVES definition:
-            //   Demand: candle HIGH outside (above top) AND LOW inside [bottom, top]
-            //   Supply: candle LOW outside (below bottom) AND HIGH inside [bottom, top]
-            bool low_in_zone  = low  <= z.top and low  >= z.bottom
-            bool high_in_zone = high <= z.top and high >= z.bottom
-            bool demand_arrives = z.zone_type == "Demand" and (high > z.top) and low_in_zone
-            bool supply_arrives = z.zone_type == "Supply" and (low  < z.bottom) and high_in_zone
-            bool arrived = demand_arrives or supply_arrives
-
-            if arrived
-                // Check nesting: z fully contained within another zone of same type
-                bool nested_same_type = false
-                int  j = 0
-                while j < array.size(active_zones)
-                    if j != i
-                        ZoneData o = array.get(active_zones, j)
-                        if o.zone_type == z.zone_type
-                            if z.bottom >= o.bottom and z.top <= o.top
-                                nested_same_type := true
-                                break
-                    j += 1
-
-                if nested_same_type
-                    float h   = z.top - z.bottom
-                    float buf = h * 0.30  // 30% of zone height
-                    float entry = close
-                    if z.zone_type == "Demand"
-                        float stop = z.bottom - buf
-                        float risk = entry - stop
-                        if risk > syminfo.mintick
-                            float tp = entry + 2.0 * risk
-                            string id = "TI5_LONG_" + str.tostring(z.creation_bar_time)
-                            strategy.entry(id, strategy.long)
-                            strategy.exit(id + "_EXIT", from_entry=id, stop=stop, limit=tp)
-                            alert("Price entered a nested supply/demand zone", alert.freq_once_per_bar_close)
-                    else
-                        float stop = z.top + buf
-                        float risk = stop - entry
-                        if risk > syminfo.mintick
-                            float tp = entry - 2.0 * risk
-                            string id = "TI5_SHORT_" + str.tostring(z.creation_bar_time)
-                            strategy.entry(id, strategy.short)
-                            strategy.exit(id + "_EXIT", from_entry=id, stop=stop, limit=tp)
-                            alert("Price entered a nested supply/demand zone", alert.freq_once_per_bar_close)
-            // === END TI-5 ===
 
             i -= 1
 
@@ -219,20 +195,17 @@ ti2_cull_overlaps_same_tf() =>
         while j < array.size(active_zones)
             ZoneData zj = array.get(active_zones, j)
             if zi.tf_label == zj.tf_label and ti2_overlap(zi, zj)
-                // keep the earliest (smaller creation_bar_time); remove the newer
                 bool keep_i = zi.creation_bar_time <= zj.creation_bar_time
                 int remove_index = keep_i ? j : i
                 ZoneData zr = array.get(active_zones, remove_index)
                 if not na(zr.zone_box)
                     box.delete(zr.zone_box)
                 array.remove(active_zones, remove_index)
-                // if we removed i, refresh zi and reset j
                 if not keep_i
                     if i < array.size(active_zones)
                         zi := array.get(active_zones, i)
                     j := i + 1
                     continue
-                // removed j; continue comparing zi with the new element at j
                 continue
             else
                 j += 1
@@ -241,11 +214,8 @@ ti2_cull_overlaps_same_tf() =>
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
     string actual_tf = tf == "" ? timeframe.period : tf
-
-    // Pull HTF series (one value per HTF bar)
     [mtf_open, mtf_high, mtf_low, mtf_close, mtf_atr, htf_time] = request.security(syminfo.tickerid, actual_tf, [open, high, low, close, ta.atr(atr_length), time], lookahead=barmerge.lookahead_off)
 
-    // Push only on NEW HTF bars (prevents intraday duplication)
     bool is_new_htf_bar = ta.change(time(actual_tf))
     if is_new_htf_bar and not na(mtf_open)
         array.unshift(open_hist,  mtf_open)
@@ -258,7 +228,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
         if array.size(open_hist) > HISTORY_LENGTH
             array.pop(open_hist), array.pop(high_hist), array.pop(low_hist), array.pop(close_hist), array.pop(atr_hist), array.pop(time_hist)
 
-        // Pattern detection (on distinct HTF bars)
         if array.size(open_hist) >= max_small_candles + 2
             float cur_open  = array.get(open_hist,  0)
             float cur_close = array.get(close_hist, 0)
@@ -266,19 +235,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
             float cur_atr   = array.get(atr_hist,  0)
             float min_long_body = cur_atr * long_atr_filter
 
-            //Check if this is a strong LEGOUT
             if cur_body >= min_long_body
-
-                // Found a LEGOUT mark with circle (kept commented per base)
-                int   mark_time = array.get(time_hist, 0)
-                float pad       = cur_atr * 0.05
-                float hi0       = array.get(high_hist, 0)
-                float lo0       = array.get(low_hist, 0)
-                //if cur_close > cur_open
-                //    label.new(mark_time, lo0 - pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.green, text="")
-                //else if cur_close < cur_open
-                //    label.new(mark_time, hi0 + pad, xloc=xloc.bar_time, style=label.style_circle, size=size.tiny, color=color.red, text="")
-
                 string cur_color = is_green_mtf(cur_open, cur_close) ? "green" : is_red_mtf(cur_open, cur_close) ? "red" : "na"
 
                 int small_count = 0
@@ -286,13 +243,11 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                 bool valid_pattern = false
                 int  leg_in_index = -1
 
-                // LOOP (leg-in check first, then small validation; no fallback)
                 while idx <= max_small_candles and idx < array.size(open_hist)
                     float s_open  = array.get(open_hist,  idx)
                     float s_close = array.get(close_hist, idx)
                     float s_body  = body_size_mtf(s_open, s_close)
 
-                    // If we already have at least one valid small, check for big leg-in first
                     if small_count >= 1
                         float leg_open  = array.get(open_hist,  idx)
                         float leg_close = array.get(close_hist, idx)
@@ -302,7 +257,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             leg_in_index  := idx
                             break
 
-                    // If no leg-in, validate current candle as a "small"
                     float s_high  = array.get(high_hist, idx)
                     float s_low   = array.get(low_hist,  idx)
                     float up_w    = s_high - math.max(s_open, s_close)
@@ -317,10 +271,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         idx += 1
                         continue
                     else
-                        // Invalid small -> stop searching (no fallback leg-in)
                         break
 
-                // If ALL small candles checked were valid, accept the zone and mark it
                 if not valid_pattern and small_count >= 1
                     int idx_candidate = math.min(idx, array.size(open_hist) - 1)
                     valid_pattern := true
@@ -332,13 +284,13 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     string leg_color = is_green_mtf(leg_open, leg_close) ? "green" : is_red_mtf(leg_open, leg_close) ? "red" : "na"
 
                     string zone_type = na, string zone_title = na
-                    if     cur_color == "green" and leg_color == "red"   // drop-base-rally
+                    if     cur_color == "green" and leg_color == "red"
                         zone_type := "Demand", zone_title := "drop-base-rally"
-                    else if cur_color == "green" and leg_color == "green" // rally-base-rally
+                    else if cur_color == "green" and leg_color == "green"
                         zone_type := "Demand", zone_title := "rally-base-rally"
-                    else if cur_color == "red"   and leg_color == "green" // rally-base-drop
+                    else if cur_color == "red"   and leg_color == "green"
                         zone_type := "Supply", zone_title := "rally-base-drop"
-                    else if cur_color == "red"   and leg_color == "red"   // drop-base-drop
+                    else if cur_color == "red"   and leg_color == "red"
                         zone_type := "Supply", zone_title := "drop-base-drop"
 
                     if not na(zone_type)
@@ -347,10 +299,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         color  zone_color = zone_type == "Demand" ? color.orange : color.blue
                         string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
-                        // Anchor by HTF time
                         int left_time = array.get(time_hist, small_count)
 
-                        // Store zone ALWAYS; draw box now only if within range
                         string label_txt = display_tf_label + ":" + zone_title + " (" + str.tostring(small_count) + ")"
                         bool   draw_now  = is_zone_in_range(zone_top, zone_bottom)
 
@@ -368,17 +318,86 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             if not na(oldest.zone_box)
                                 box.delete(oldest.zone_box)
 
-                        // === TI-2: After adding a zone, cull overlaps (same timeframe -> keep earliest) ===
                         ti2_cull_overlaps_same_tf()
+
+// === TI-6: Evaluate entries AFTER zones are set/refined (current TF candle vs ALL zones)
+ti6_eval_revisit_entries() =>
+    if array.size(active_zones) > 0
+        bool isGreen = close > open
+        bool isRed   = close < open
+
+        for n = 0 to array.size(active_zones) - 1
+            ZoneData z = array.get(active_zones, n)
+            bool close_in = within(close, z.top, z.bottom)
+            bool high_in  = within(high,  z.top, z.bottom)
+            bool low_in   = within(low,   z.top, z.bottom)
+
+            // Supply revisit (downtrend): green candle & (high OR close) within the zone
+            bool supply_revisit = (z.zone_type == "Supply") and downtrend and isGreen and (high_in or close_in)
+
+            // Demand revisit (uptrend): red candle & (low OR close) within the zone
+            bool demand_revisit = (z.zone_type == "Demand") and uptrend and isRed and (low_in or close_in)
+
+            // SHORT setup (no explicit TP; stop only)
+            if supply_revisit
+                float h    = z.top - z.bottom
+                float buf  = h * 0.30
+                float entry= close
+                float stop = z.top + buf
+                float risk = stop - entry
+                if risk > syminfo.mintick
+                    string id  = "TI6_SHORT_" + str.tostring(z.creation_bar_time)
+                    strategy.entry(id, strategy.short)
+                    // === TI-6: exit with STOP ONLY (no limit TP)
+                    strategy.exit(id + "_EXIT", from_entry=id, stop=stop)
+                    alert("Price retraced to a zone", alert.freq_once_per_bar_close)
+
+            // LONG setup (no explicit TP; stop only)
+            if demand_revisit
+                float h    = z.top - z.bottom
+                float buf  = h * 0.30
+                float entry= close
+                float stop = z.bottom - buf
+                float risk = entry - stop
+                if risk > syminfo.mintick
+                    string id  = "TI6_LONG_" + str.tostring(z.creation_bar_time)
+                    strategy.entry(id, strategy.long)
+                    // === TI-6: exit with STOP ONLY (no limit TP)
+                    strategy.exit(id + "_EXIT", from_entry=id, stop=stop)
+                    alert("Price retraced to a zone", alert.freq_once_per_bar_close)
+// === END TI-6 ===
+
+// === TI-6: Dynamic TP — close when 3 consecutive opposite candles appear
+ti6_dynamic_tp() =>
+    // Close SHORTs on 3 green candles; LONGs on 3 red candles
+    bool closeShorts = consecBull >= 3
+    bool closeLongs  = consecBear >= 3
+    if (closeShorts or closeLongs) and array.size(active_zones) > 0
+        for n = 0 to array.size(active_zones) - 1
+            ZoneData z = array.get(active_zones, n)
+            if closeShorts
+                string sid = "TI6_SHORT_" + str.tostring(z.creation_bar_time)
+                strategy.close(sid)
+            if closeLongs
+                string lid = "TI6_LONG_" + str.tostring(z.creation_bar_time)
+                strategy.close(lid)
+// === END TI-6 ===
 
 // === Main ===
 if show_60
-    detect_mtf_patterns_universal("60", "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)  // 60M analysis
+    detect_mtf_patterns_universal("60", "60M", mtf_open_history_60, mtf_high_history_60, mtf_low_history_60, mtf_close_history_60, mtf_atr_history_60, mtf_time_history_60)
 if show_15
-    detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)  // 15M analysis
+    detect_mtf_patterns_universal("15", "15M", mtf_open_history_15, mtf_high_history_15, mtf_low_history_15, mtf_close_history_15, mtf_atr_history_15, mtf_time_history_15)
 if show_5
-    detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)    // 5M analysis
+    detect_mtf_patterns_universal("5", "5M", mtf_open_history_5, mtf_high_history_5, mtf_low_history_5, mtf_close_history_5, mtf_atr_history_5, mtf_time_history_5)
 if show_ct
-    detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)  // Current timeframe analysis
+    detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
+// Zones are drawn/culled/toggled here
 update_zones()
+
+// === TI-6: Only now evaluate entries against the current bar
+ti6_eval_revisit_entries()
+
+// === TI-6: Dynamic TP evaluation (run every bar after entries)
+ti6_dynamic_tp()
