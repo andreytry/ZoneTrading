@@ -184,3 +184,21 @@ Never change the name of the indicator!!!
 The code you generate must be syntactycally correct pinescript , compile without errors
 never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
 DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+==================================================
+
+
+When the price arrives to a zone and rejects from a zone, with a candle about 0.5 ATR (setting in UI) send an alert:
+Price of <ticker> rejected from the level ..... <the rejection level>  in the direction of trend 
+
+
+
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
