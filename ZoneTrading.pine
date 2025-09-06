@@ -1,5 +1,5 @@
 //@version=5 
-indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
+indicator("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -145,7 +145,8 @@ update_zones() =>
             bool in_range_now = is_zone_in_range(z.top, z.bottom)
 
             if in_range_now and na(z.zone_box)
-                color zone_color = z.zone_type == "Demand" ? color.orange : color.blue
+                // TI-7: Change zone colors — Demand = green, Supply = red
+                color zone_color = z.zone_type == "Demand" ? color.green : color.red
                 box bx = box.new(
                      z.creation_bar_time, z.top,
                      z.creation_bar_time, z.bottom,
@@ -274,7 +275,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
-                        color  zone_color = zone_type == "Demand" ? color.orange : color.blue
+                        // TI-7: Change zone colors — Demand = green, Supply = red
+                        color  zone_color = zone_type == "Demand" ? color.green : color.red
                         string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
                         int left_time = array.get(time_hist, small_count)
@@ -303,9 +305,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
-// Detect rejections ONLY when price REVISITS the zone and then LEAVES it with a strong move (>= threshold).
-// Do NOT mark if the bar closes inside the zone. Allow "just-touch" by min/max.
-// TI-7: Trigger alerts and draw B/S only when alerts toggle is ON.
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
@@ -317,7 +316,6 @@ detect_rejections() =>
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
 
-            // Skip the very legout bar that formed the zone
             bool after_legout = time > z.legout_time
             if not after_legout
                 continue
@@ -326,19 +324,19 @@ detect_rejections() =>
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_up and strong  // TI-7
+                if alerts_on_departure and touched and left_up and strong
                     float level_d = z.top
-                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)  // TI-7
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close) // TI-7
+                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
 
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_dn and strong  // TI-7
+                if alerts_on_departure and touched and left_dn and strong
                     float level_s = z.bottom
-                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny) // TI-7
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close) // TI-7
+                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
 
 // === Main orchestration placed at the bottom ===
 main() =>

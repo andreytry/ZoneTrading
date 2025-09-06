@@ -1,5 +1,5 @@
 //@version=5 
-indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
+indicator("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -30,7 +30,9 @@ max_zones = input.int(200, "Max Active Zones", minval=10, maxval=200, group=grou
 range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1, group=group_params)
 
 // === TI-7: Rejection candle body threshold input (× ATR) ===
-rejection_atr_mult = input.float(0.5, "TI-7: Rejection Candle Min Body (× ATR)", minval=0.0, step=0.05, group=group_params)
+rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minval=0.0, step=0.05, group=group_params)
+// === TI-7: Alert toggle (default OFF) ===
+alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -143,19 +145,20 @@ update_zones() =>
             bool in_range_now = is_zone_in_range(z.top, z.bottom)
 
             if in_range_now and na(z.zone_box)
-                color zone_color = z.zone_type == "Demand" ? color.orange : color.blue
+                // TI-7: Change zone colors — Demand = green, Supply = red
+                color zone_color = z.zone_type == "Demand" ? color.green : color.red
                 box bx = box.new(
                      z.creation_bar_time, z.top,
                      z.creation_bar_time, z.bottom,
                      xloc=xloc.bar_time, extend=extend.right,
                      border_color=zone_color, bgcolor=color.new(zone_color, 85),
                      text=z.label_text, text_color=zone_color, text_size=size.small)
-                ZoneData z2 = ZoneData.new(bx, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt, z.legout_time) // TI-7
+                ZoneData z2 = ZoneData.new(bx, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt, z.legout_time)
                 array.set(active_zones, i, z2)
 
             if (not in_range_now) and not na(z.zone_box)
                 box.delete(z.zone_box)
-                ZoneData z3 = ZoneData.new(na, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt, z.legout_time) // TI-7
+                ZoneData z3 = ZoneData.new(na, z.top, z.bottom, z.zone_type, z.creation_bar_time, z.tf_label, z.label_text, z.small_cnt, z.legout_time)
                 array.set(active_zones, i, z3)
 
             i -= 1
@@ -272,7 +275,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 
                     if not na(zone_type)
                         [zone_top, zone_bottom] = find_zone_boundaries_universal(0, small_count, zone_type, open_hist, high_hist, low_hist, close_hist)
-                        color  zone_color = zone_type == "Demand" ? color.orange : color.blue
+                        // TI-7: Change zone colors — Demand = green, Supply = red
+                        color  zone_color = zone_type == "Demand" ? color.green : color.red
                         string display_tf_label = actual_tf == timeframe.period ? "CT" : tf_label
 
                         int left_time = array.get(time_hist, small_count)
@@ -287,7 +291,7 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                           border_color=zone_color, bgcolor=color.new(zone_color, 85),
                                           text=label_txt, text_color=zone_color, text_size=size.small)
 
-                        ZoneData new_zone = ZoneData.new(bx, zone_top, zone_bottom, zone_type, left_time, display_tf_label, label_txt, small_count, legout_time0) // TI-7
+                        ZoneData new_zone = ZoneData.new(bx, zone_top, zone_bottom, zone_type, left_time, display_tf_label, label_txt, small_count, legout_time0)
                         array.unshift(active_zones, new_zone)
 
                         if array.size(active_zones) > max_zones
@@ -301,8 +305,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
-// TI-7: Detect rejections ONLY when price REVISITS the zone and then LEAVES it with a strong move (>= threshold).
-//       Do NOT mark if the bar closes inside the zone. Also allow "just-touch" by the bar's min/max.
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
@@ -314,36 +316,27 @@ detect_rejections() =>
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
 
-            // Skip the very legout bar that formed the zone
             bool after_legout = time > z.legout_time
             if not after_legout
                 continue
 
-            // Demand rejection (potential long):
-            //  - bar touches the zone with its low (revisit)
-            //  - bar CLOSES ABOVE the zone (leaves it)
-            //  - bullish body >= threshold
             if z.zone_type == "Demand"
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
-                if touched and left_up and strong
+                if alerts_on_departure and touched and left_up and strong
                     float level_d = z.top
-                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)  // TI-7
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)  // TI-7
+                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
 
-            // Supply rejection (potential short):
-            //  - bar touches the zone with its high (revisit)
-            //  - bar CLOSES BELOW the zone (leaves it)
-            //  - bearish body >= threshold
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
-                if touched and left_dn and strong
+                if alerts_on_departure and touched and left_dn and strong
                     float level_s = z.bottom
-                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)  // TI-7
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)  // TI-7
+                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
 
 // === Main orchestration placed at the bottom ===
 main() =>
