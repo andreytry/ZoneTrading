@@ -190,15 +190,232 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 
 
 When the price arrives to a zone and rejects from a zone, with a candle about 0.5 ATR (setting in UI) send an alert:
-Price of <ticker> rejected from the level ..... <the rejection level>  in the direction of trend 
+Price of <ticker> rejected from the level ..... <the rejection level>   
+Mark the rejection as potial entry: green "B" for long, red "S" for short
 
 
-
+Mark the changes with user story ID: TI-7 
 
 Use the code below as the starting point!!!
 IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
 Mark changes with the user story ID TI-6
 Never change the name of the indicator!!!
 The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+===========================
+
+UPdate code You dont markt the "rejection" that formed the zone, only the subsequent rejections. I.e. if the rejection candle is the legout - dont mark it as a rejection. also put the "main()" function at the bottom of the script
+
+
+Update the code markonly the cases when the price revisited the zone and left the zone with a strong move at least 0.5 atr (UI setting) . 
+DO not mark if the price remains within the zone - it shoul leave the zone with a strong move or just touch the zone with the minimum or maximum of the candle.
+
+
+Mark the changes with user story ID: TI-7 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+============================== 
+
+
+Remove the TI-7 label from the UI
+MAke a setting: Alert on zone depature. Bool, default OFF 
+Trigger the allerts and show the B and S labels only if the alerts are ON
+
+
+Mark the changes with user story ID: TI-7 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+
+============================== 
+
+
+Change the zones colors:
+SUpply - red, Demand - green
+
+Mark the changes with user story ID: TI-7 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+============================== 
+
+
+Update the script below turn it into a strategy. 
+
+Go long when you generate B, stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+Take profit - at the bottom of the next available supply zone above
+
+Go whort when you generate S, stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+Take profit - at the top of the next available demand zone below
+
+Mark the changes with user story ID: TI-9 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+============================== 
+
+
+Update the script below turn it into a strategy. 
+
+
+Go LONG when 
+the price makes a strong long move of size  (Rejection Candle Min Body (xATR) setting)  from a demand zone - no matter if the zone is revisited or newly formed
+stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+Take profit  or exit - when there is a srong short move (use Rejection Candle Min Body (xATR) setting) - not at the previous zone 
+
+
+Go SHORT when the price makes a strong short move of size ( Rejection Candle Min Body (xATR) setting)  from a supply zone - no matter if the zone is revisited or newly formed
+stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+Take profit or exit  - when there is a srong long move (use Rejection Candle Min Body (xATR) setting)
+
+Mark the changes with user story ID: TI-9 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Mark changes with the user story ID TI-6
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+============================== 
+
+
+Update the script below turn it into a strategy. 
+
+
+Go LONG when 
+EMA 20 is over EMA50
+THe price is in a demand zone close to EMA20 within (Rejection Candle Min Body (xATR) setting), makes strong move UP  (Rejection Candle Min Body (xATR) setting)
+stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+Take profit  or exit - when there is a srong short move (use Rejection Candle Min Body (xATR) setting) - not at the previous zone 
+
+
+Go SHORT when 
+EMA 20 is under EMA50
+THe price is in a supply zone close to EMA20 within (Rejection Candle Min Body (xATR) setting) , makes strong move DOWN (Rejection Candle Min Body (xATR) setting)
+stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+Take profit or exit  - when there is a srong long move (use Rejection Candle Min Body (xATR) setting)
+
+Mark the changes with user story ID: TI-9 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+=================================
+//v20
+//Did not work - negative profit
+
+Go LONG when 
+THe price is in a demand zone or touches the demand zone with its low
+The height of the zone is within (Rejection Candle Min Body (xATR) setting)
+stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+EITHER:
+    There is no supply zones above within at least 2R (setting Stoploss distance from zone)
+OR
+    There is an Uptrend - EMA20 is above EMA50
+Take profit - at the next supply zone
+Move stoploss to Break even when the price has passed 50% to the target 
+
+Go SHORT when 
+THe price is in a supply zone or touches the supply zone with its high
+The height of the zone is within (Rejection Candle Min Body (xATR) setting)
+stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+EITHER
+    There is no demand zones below within at least 1R (setting Stoploss distance from zone)
+OR 
+    There is a Downtrend - EMA20 is below EMA50
+Take profit - at the next demand zone
+Move stoploss to Break even when the price has passed 50% to the target 
+
+Mark the changes with user story ID: TI-9 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+=================================
+
+
+Go LONG when 
+THe price is in a demand zone or touches the demand zone with its low
+The height of the zone is within (Rejection Candle Min Body (xATR) setting)
+stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+EITHER:
+    There is no supply zones above within at least 2R (setting Stoploss distance from zone)
+OR
+    There is an Uptrend - EMA20 is above EMA50
+Take profit - at the next supply zone
+Move stoploss to Break even when the price has passed 50% to the target 
+
+Go SHORT when 
+THe price is in a supply zone or touches the supply zone with its high
+The height of the zone is within (Rejection Candle Min Body (xATR) setting)
+stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+EITHER
+    There is no demand zones below within at least 1R (setting Stoploss distance from zone)
+OR 
+    There is a Downtrend - EMA20 is below EMA50
+Take profit - at the next demand zone
+Move stoploss to Break even when the price has passed 50% to the target 
+
+Mark the changes with user story ID: TI-9 
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
 never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
 DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
