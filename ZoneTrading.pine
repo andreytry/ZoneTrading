@@ -313,6 +313,10 @@ detect_rejections() =>
         bool green = close > open
         bool red   = close < open
 
+        // TI-10: previous bar color and body bounds for engulfing checks
+        bool prev_green = close[1] > open[1]  // TI-10
+        bool prev_red   = close[1] < open[1]  // TI-10
+
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
 
@@ -324,7 +328,13 @@ detect_rejections() =>
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_up and strong
+
+                // TI-10: if previous bar was red, require bullish engulfing of its body
+                bool bullish_engulf_ok = true
+                if prev_red
+                    bullish_engulf_ok := (open <= close[1]) and (close >= open[1])
+
+                if alerts_on_departure and touched and left_up and strong and bullish_engulf_ok  // TI-10
                     float level_d = z.top
                     label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
                     alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
@@ -333,7 +343,13 @@ detect_rejections() =>
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_dn and strong
+
+                // TI-10: if previous bar was green, require bearish engulfing of its body
+                bool bearish_engulf_ok = true
+                if prev_green
+                    bearish_engulf_ok := (open >= close[1]) and (close <= open[1])
+
+                if alerts_on_departure and touched and left_dn and strong and bearish_engulf_ok  // TI-10
                     float level_s = z.bottom
                     label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
                     alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)

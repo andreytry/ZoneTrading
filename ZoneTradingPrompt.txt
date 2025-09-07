@@ -385,32 +385,20 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 
 
 =================================
+//TI-10
+//Check freshness of the zone max 2 touches allowed
+
+update the script
+Before generating B or S check freshness of the zone;
+If at least 2 (Setting  Max zone touches) B were already generated in the same demand zone
+or at least 2 (Setting  Max zone touches) S were already generated in the same supply zone 
+then do not generate any more B or S in the same zone - it is considered not fresh any more
 
 
-Go LONG when 
-THe price is in a demand zone or touches the demand zone with its low
-The height of the zone is within (Rejection Candle Min Body (xATR) setting)
-stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
-EITHER:
-    There is no supply zones above within at least 2R (setting Stoploss distance from zone)
-OR
-    There is an Uptrend - EMA20 is above EMA50
-Take profit - at the next supply zone
-Move stoploss to Break even when the price has passed 50% to the target 
 
-Go SHORT when 
-THe price is in a supply zone or touches the supply zone with its high
-The height of the zone is within (Rejection Candle Min Body (xATR) setting)
-stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
-EITHER
-    There is no demand zones below within at least 1R (setting Stoploss distance from zone)
-OR 
-    There is a Downtrend - EMA20 is below EMA50
-Take profit - at the next demand zone
-Move stoploss to Break even when the price has passed 50% to the target 
+Mark the changes with user story ID: TI-10
 
-Mark the changes with user story ID: TI-9 
-
+DO NOT CHANGE ZONE DRAWING LOGIC!!!! the change effects only showing of the B and S!!!
 Use the code below as the starting point!!!
 IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
 Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
@@ -418,4 +406,112 @@ Never change the name of the indicator!!!
 The code you generate must be syntactycally correct pinescript , compile without errors
 Never use the functions that are not in the standard library, like math.inf
 never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+
+=================================
+//TI-10
+//Check freshness of the zone max 2 touches allowed
+
+Go LONG when 
+EMA 20 is over EMA50
+THe price is in a demand zone close to EMA20 within (Rejection Candle Min Body (xATR) setting), makes strong move UP  (Rejection Candle Min Body (xATR) setting)
+stoploss below the zone from where the price rejected -30% (common setting for all stoplosses)
+Take profit  or exit - when there is a srong short move (use Rejection Candle Min Body (xATR) setting) - not at the previous zone 
+
+
+Go SHORT when 
+EMA 20 is under EMA50
+THe price is in a supply zone close to EMA20 within (Rejection Candle Min Body (xATR) setting) , makes strong move DOWN (Rejection Candle Min Body (xATR) setting)
+stoploss above the zone from where the price rejected +30% (common setting for all stoplosses)
+Take profit or exit  - when there is a srong long move (use Rejection Candle Min Body (xATR) setting)
+
+
+Mark the changes with user story ID: TI-9s
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Dont do any other changes!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+
+=================================
+//TI-9
+//Convert to strategy
+
+Enter Long position when B alert is generated.
+stoploss below the zone at 30% of the zone size (setting Stoploss distance percent of zone size) 
+Exit position when reached supply zone of the same level (M1, M15, M15... ) as the demand zone from where the price rejected
+
+Enter Short position when S alert is generated.
+stoploss above the zone at 30% of the zone size (setting Stoploss distance percent of zone size) 
+Exit position when reached demand zone of the same level (M1, M15, M15... ) as the supply zone from where the price rejected
+
+
+
+
+Mark the changes with user story ID: TI-9
+
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Dont do any other changes!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ide to name functions variables and other identifiers!!!! it is only for comments!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+never name functions after the user story ID like TI-6, TI-2.... give them meaningful names!
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+=================================
+//TI-11 preferred and extended version of the zone
+
+update the script
+For demand zone identify upper boundary as follows:
+If the Checkbox "Use extended version of the zone" is checked then the upper bound of the zone is 
+
+
+
+Mark the changes with user story ID: TI-10
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+
+=================================
+//TI-12 engoulding on rejection
+
+update the script
+Add the following condition for B:
+if the strong green candle departing the zone follows a red candle , it must engulf it
+
+Add the following condition for S:
+if the strong green candle departing the zone follows a red candle , it must engulf it
+
+
+Mark the changes with user story ID: TI-10
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
 DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!

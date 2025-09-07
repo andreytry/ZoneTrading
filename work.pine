@@ -1,6 +1,5 @@
-//@version=5
-// === TI-9: convert to strategy but KEEP THE SAME NAME ===
-strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)  // TI-9
+//@version=5 
+indicator("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -55,6 +54,38 @@ type ZoneData
 // === Arrays to store zone data ===
 var array<ZoneData> active_zones = array.new<ZoneData>()
 
+// === TI-10: Simple key→count map for rejections (per zone) ===
+var array<string> ti10_keys   = array.new_string()  // TI-10
+var array<int>    ti10_counts = array.new_int()     // TI-10
+zone_key(ztype, tflabel, ctime, top_, bottom_) =>    // TI-10
+    ztype + "|" + tflabel + "|" + str.tostring(ctime) + "|" + str.tostring(top_, format.mintick) + "|" + str.tostring(bottom_, format.mintick)
+ti10_find_idx(key) =>                                // TI-10
+    int idx = -1
+    for i = 0 to array.size(ti10_keys) - 1
+        if array.get(ti10_keys, i) == key
+            idx := i
+            break
+    idx
+ti10_inc_and_get(key) =>                             // TI-10
+    int i = ti10_find_idx(key)
+    if i == -1
+        array.push(ti10_keys, key)
+        array.push(ti10_counts, 1)
+        1
+    else
+        int n = array.get(ti10_counts, i) + 1
+        array.set(ti10_counts, i, n)
+        n
+// --- TI-10: cleanup helpers (added) ---
+remove_rejection_key(key) =>                         // TI-10
+    int i = ti10_find_idx(key)
+    if i != -1
+        array.remove(ti10_keys, i)
+        array.remove(ti10_counts, i)
+cleanup_rejection_for_zone(z) =>                     // TI-10
+    string k = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)
+    remove_rejection_key(k)
+
 // === Historical data storage (60M) ===
 var array<float> mtf_open_history_60  = array.new<float>()
 var array<float> mtf_high_history_60  = array.new<float>()
@@ -108,6 +139,7 @@ is_zone_breached(zone_data) =>
 find_zone_boundaries_universal(start_idx, num_small_candles, zone_type, open_hist, high_hist, low_hist, close_hist) =>
     float zone_top = na
     float zone_bottom = na
+    
     if zone_type == "Demand"
         zone_top   := math.max(array.get(open_hist, start_idx + 1), array.get(close_hist, start_idx + 1))
         zone_bottom:= array.get(low_hist,  start_idx)
@@ -138,6 +170,8 @@ update_zones() =>
             if is_zone_breached(z)
                 if not na(z.zone_box)
                     box.delete(z.zone_box)
+                // TI-10: cleanup map entry for this deleted zone
+                cleanup_rejection_for_zone(z)  // TI-10
                 array.remove(active_zones, i)
                 i -= 1
                 continue
@@ -177,6 +211,8 @@ ti2_cull_overlaps_same_tf() =>
                 ZoneData zr = array.get(active_zones, remove_index)
                 if not na(zr.zone_box)
                     box.delete(zr.zone_box)
+                // TI-10: cleanup map entry for the culled zone
+                cleanup_rejection_for_zone(zr)  // TI-10
                 array.remove(active_zones, remove_index)
                 if not keep_i
                     if i < array.size(active_zones)
@@ -298,6 +334,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             ZoneData oldest = array.pop(active_zones)
                             if not na(oldest.zone_box)
                                 box.delete(oldest.zone_box)
+                            // TI-10: cleanup map entry for the dropped oldest zone
+                            cleanup_rejection_for_zone(oldest)  // TI-10
 
                         ti2_cull_overlaps_same_tf()
 
@@ -305,24 +343,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
-// === TI-9: helpers to locate TP zones ===
-get_nearest_supply_bottom_above(price) =>
-    float best = na
-    for i = 0 to array.size(active_zones) - 1
-        ZoneData z = array.get(active_zones, i)
-        if z.zone_type == "Supply" and z.bottom > price
-            best := na(best) ? z.bottom : math.min(best, z.bottom)
-    best
-
-get_nearest_demand_top_below(price) =>
-    float best = na
-    for i = 0 to array.size(active_zones) - 1
-        ZoneData z = array.get(active_zones, i)
-        if z.zone_type == "Demand" and z.top < price
-            best := na(best) ? z.top : math.max(best, z.top)
-    best
-
-// === TI-9: place trades when B/S rejection occurs (labels/alerts still respect the UI toggle) ===
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
@@ -331,52 +351,40 @@ detect_rejections() =>
         bool green = close > open
         bool red   = close < open
 
-        bool trade_placed = false  // TI-9: avoid multiple entries per bar
         for i = 0 to array.size(active_zones) - 1
-            if trade_placed
-                break
             ZoneData z = array.get(active_zones, i)
+
             bool after_legout = time > z.legout_time
             if not after_legout
                 continue
-
-            float h = z.top - z.bottom
-            float sl_buf = h * 0.30  // TI-9: common 30% buffer
 
             if z.zone_type == "Demand"
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
-                if touched and left_up and strong
-                    // === TI-9: LONG trade from Demand ===
-                    float entry = close
-                    float stop  = z.bottom - sl_buf
-                    float tp    = get_nearest_supply_bottom_above(entry)
-                    string id   = "TI9_L_" + str.tostring(time)
-                    strategy.entry(id, strategy.long)
-                    // limit may be na if no supply above
-                    strategy.exit(id + "_X", from_entry=id, stop=stop, limit=tp)
-                    trade_placed := true
-                    if alerts_on_departure
-                        label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
-                        alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(z.top, format.mintick), alert.freq_once_per_bar_close)
+                if alerts_on_departure and touched and left_up and strong
+                    float level_d = z.top
+                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                    // TI-10: increment this zone's rejection count and reflect it in the box text
+                    string keyD = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)          // TI-10
+                    int newCntD = ti10_inc_and_get(keyD)                                                           // TI-10
+                    if not na(z.zone_box)
+                        box.set_text(z.zone_box, z.label_text + " | R:" + str.tostring(newCntD))                   // TI-10
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
 
-            if z.zone_type == "Supply" and not trade_placed
+            if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
-                if touched and left_dn and strong
-                    // === TI-9: SHORT trade from Supply ===
-                    float entry = close
-                    float stop  = z.top + sl_buf
-                    float tp    = get_nearest_demand_top_below(entry)
-                    string id   = "TI9_S_" + str.tostring(time)
-                    strategy.entry(id, strategy.short)
-                    strategy.exit(id + "_X", from_entry=id, stop=stop, limit=tp)
-                    trade_placed := true
-                    if alerts_on_departure
-                        label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
-                        alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(z.bottom, format.mintick), alert.freq_once_per_bar_close)
+                if alerts_on_departure and touched and left_dn and strong
+                    float level_s = z.bottom
+                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                    // TI-10: increment this zone's rejection count and reflect it in the box text
+                    string keyS = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)          // TI-10
+                    int newCntS = ti10_inc_and_get(keyS)                                                           // TI-10
+                    if not na(z.zone_box)
+                        box.set_text(z.zone_box, z.label_text + " | R:" + str.tostring(newCntS))                   // TI-10
+                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
 
 // === Main orchestration placed at the bottom ===
 main() =>
@@ -390,7 +398,7 @@ main() =>
         detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
     update_zones()
-    detect_rejections() // TI-7 + TI-9 (now also places trades)
+    detect_rejections() // TI-7
 
 // === Run main ===
 main()
