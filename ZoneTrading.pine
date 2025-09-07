@@ -1,5 +1,6 @@
-//@version=5 
-indicator("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)
+//@version=5
+// TI-9: switch to strategy to place orders (keeps the same script title)
+strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -33,6 +34,9 @@ range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1,
 rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minval=0.0, step=0.05, group=group_params)
 // === TI-7: Alert toggle (default OFF) ===
 alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
+
+// === TI-9: Stop loss distance as % of zone height (outside the zone) ===
+sl_zone_pct = input.float(0.30, "Stoploss distance percent of zone size", minval=0.0, step=0.01, group=group_params) // TI-9
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -249,7 +253,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     if wick_ok and size_ok
                         small_count += 1
                         idx += 1
-                        continue
                     else
                         break
 
@@ -305,6 +308,47 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
+// === TI-9: position context & entry IDs (stored in arrays for safe mutation)
+var pos_tf_label_arr    = array.new_string()
+var pos_zone_type_arr   = array.new_string()
+var pos_zone_top_arr    = array.new_float()
+var pos_zone_bottom_arr = array.new_float()
+var pos_entry_id_arr    = array.new_string()
+if barstate.isfirst
+    array.push(pos_tf_label_arr, "")
+    array.push(pos_zone_type_arr, "")
+    array.push(pos_zone_top_arr, na)
+    array.push(pos_zone_bottom_arr, na)
+    array.push(pos_entry_id_arr, "")
+
+set_position_context(tf_lbl, z_type, z_top, z_bottom, entry_id) =>
+    array.set(pos_tf_label_arr, 0, tf_lbl)
+    array.set(pos_zone_type_arr, 0, z_type)
+    array.set(pos_zone_top_arr, 0, z_top)
+    array.set(pos_zone_bottom_arr, 0, z_bottom)
+    array.set(pos_entry_id_arr, 0, entry_id)
+
+clear_position_context() =>
+    array.set(pos_tf_label_arr, 0, "")
+    array.set(pos_zone_type_arr, 0, "")
+    array.set(pos_zone_top_arr, 0, na)
+    array.set(pos_zone_bottom_arr, 0, na)
+    array.set(pos_entry_id_arr, 0, "")
+
+// === TI-9: build entry/exit ID "YYYYMMDDHHMISS.SSS"
+zero2(n) => n < 10 ? "0" + str.tostring(n) : str.tostring(n)
+zero3(n) => n < 10 ? "00" + str.tostring(n) : n < 100 ? "0" + str.tostring(n) : str.tostring(n)
+make_trade_id() =>
+    string y  = str.tostring(year)
+    string mo = zero2(month)
+    string d  = zero2(dayofmonth)
+    string h  = zero2(hour)
+    string mi = zero2(minute)
+    string s  = zero2(second)
+    int ms    = int(math.round(time % 1000))
+    y + mo + d + h + mi + s + "." + zero3(ms)
+
+// === Signals + TI-9 entries/exits/reversals
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
@@ -313,46 +357,79 @@ detect_rejections() =>
         bool green = close > open
         bool red   = close < open
 
-        // TI-10: previous bar color and body bounds for engulfing checks
-        bool prev_green = close[1] > open[1]  // TI-10
-        bool prev_red   = close[1] < open[1]  // TI-10
-
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
-
             bool after_legout = time > z.legout_time
             if not after_legout
                 continue
 
+            // ==== DEMAND → B (enter LONG, reverse if short)
             if z.zone_type == "Demand"
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
+                if touched and left_up and strong
+                    // Reversal if currently short
+                    if strategy.position_size < 0
+                        string exit_idS = array.get(pos_entry_id_arr, 0)
+                        strategy.close("SHORT", comment=exit_idS)
+                        clear_position_context()
+                    // Enter long if flat/short
+                    if strategy.position_size <= 0
+                        string new_id = make_trade_id()
+                        float zone_h  = z.top - z.bottom
+                        float sl_long = z.bottom - zone_h * sl_zone_pct
+                        strategy.entry("LONG", strategy.long, comment=new_id)
+                        strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long, comment=new_id)
+                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom, new_id)
+                    // Labels/alerts unchanged; only B/S are allowed
+                    if alerts_on_departure
+                        label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                        alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(z.top, format.mintick), alert.freq_once_per_bar_close)
 
-                // TI-10: if previous bar was red, require bullish engulfing of its body
-                bool bullish_engulf_ok = true
-                if prev_red
-                    bullish_engulf_ok := (open <= close[1]) and (close >= open[1])
-
-                if alerts_on_departure and touched and left_up and strong and bullish_engulf_ok  // TI-10
-                    float level_d = z.top
-                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
-
+            // ==== SUPPLY → S (enter SHORT, reverse if long)
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
+                if touched and left_dn and strong
+                    // Reversal if currently long
+                    if strategy.position_size > 0
+                        string exit_idL = array.get(pos_entry_id_arr, 0)
+                        strategy.close("LONG", comment=exit_idL)
+                        clear_position_context()
+                    // Enter short if flat/long
+                    if strategy.position_size >= 0
+                        string new_idS = make_trade_id()
+                        float zone_hS  = z.top - z.bottom
+                        float sl_short = z.top + zone_hS * sl_zone_pct
+                        strategy.entry("SHORT", strategy.short, comment=new_idS)
+                        strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short, comment=new_idS)
+                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom, new_idS)
+                    // Labels/alerts unchanged; only B/S are allowed
+                    if alerts_on_departure
+                        label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                        alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(z.bottom, format.mintick), alert.freq_once_per_bar_close)
 
-                // TI-10: if previous bar was green, require bearish engulfing of its body
-                bool bearish_engulf_ok = true
-                if prev_green
-                    bearish_engulf_ok := (open >= close[1]) and (close <= open[1])
-
-                if alerts_on_departure and touched and left_dn and strong and bearish_engulf_ok  // TI-10
-                    float level_s = z.bottom
-                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
-                    alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
+// === TI-9: exit when reaching opposite zone of the same timeframe label
+manage_exits_same_tf() =>
+    if strategy.position_size != 0
+        string ctx_tf   = array.get(pos_tf_label_arr, 0)
+        string ctx_id   = array.get(pos_entry_id_arr, 0)
+        if ctx_tf != "" and ctx_id != ""
+            for i = 0 to array.size(active_zones) - 1
+                ZoneData z = array.get(active_zones, i)
+                if z.tf_label == ctx_tf
+                    // Long: exit at Supply zone of same TF
+                    if strategy.position_size > 0 and z.zone_type == "Supply" and high >= z.bottom
+                        strategy.close("LONG", comment=ctx_id)
+                        clear_position_context()
+                        break
+                    // Short: exit at Demand zone of same TF
+                    if strategy.position_size < 0 and z.zone_type == "Demand" and low <= z.top
+                        strategy.close("SHORT", comment=ctx_id)
+                        clear_position_context()
+                        break
 
 // === Main orchestration placed at the bottom ===
 main() =>
@@ -366,7 +443,8 @@ main() =>
         detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
     update_zones()
-    detect_rejections() // TI-7
+    detect_rejections()     // TI-9: generate B/S entries + reversals
+    manage_exits_same_tf()  // TI-9: exit at opposite zone (same TF)
 
 // === Run main ===
 main()

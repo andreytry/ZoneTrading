@@ -1,5 +1,6 @@
 //@version=5 
-indicator("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500)
+// TI-9: switched to strategy so we can place trades (kept the same script name)
+strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -34,6 +35,9 @@ rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minv
 // === TI-7: Alert toggle (default OFF) ===
 alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
 
+// === TI-9: Stop loss setting (percent of zone size) ===
+sl_zone_pct = input.float(0.30, "Stoploss distance percent of zone size", minval=0.0, step=0.01, group=group_params)  // TI-9
+
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
 is_green_mtf(_open, _close)  => _close > _open
@@ -53,38 +57,6 @@ type ZoneData
 
 // === Arrays to store zone data ===
 var array<ZoneData> active_zones = array.new<ZoneData>()
-
-// === TI-10: Simple key→count map for rejections (per zone) ===
-var array<string> ti10_keys   = array.new_string()  // TI-10
-var array<int>    ti10_counts = array.new_int()     // TI-10
-zone_key(ztype, tflabel, ctime, top_, bottom_) =>    // TI-10
-    ztype + "|" + tflabel + "|" + str.tostring(ctime) + "|" + str.tostring(top_, format.mintick) + "|" + str.tostring(bottom_, format.mintick)
-ti10_find_idx(key) =>                                // TI-10
-    int idx = -1
-    for i = 0 to array.size(ti10_keys) - 1
-        if array.get(ti10_keys, i) == key
-            idx := i
-            break
-    idx
-ti10_inc_and_get(key) =>                             // TI-10
-    int i = ti10_find_idx(key)
-    if i == -1
-        array.push(ti10_keys, key)
-        array.push(ti10_counts, 1)
-        1
-    else
-        int n = array.get(ti10_counts, i) + 1
-        array.set(ti10_counts, i, n)
-        n
-// --- TI-10: cleanup helpers (added) ---
-remove_rejection_key(key) =>                         // TI-10
-    int i = ti10_find_idx(key)
-    if i != -1
-        array.remove(ti10_keys, i)
-        array.remove(ti10_counts, i)
-cleanup_rejection_for_zone(z) =>                     // TI-10
-    string k = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)
-    remove_rejection_key(k)
 
 // === Historical data storage (60M) ===
 var array<float> mtf_open_history_60  = array.new<float>()
@@ -170,8 +142,6 @@ update_zones() =>
             if is_zone_breached(z)
                 if not na(z.zone_box)
                     box.delete(z.zone_box)
-                // TI-10: cleanup map entry for this deleted zone
-                cleanup_rejection_for_zone(z)  // TI-10
                 array.remove(active_zones, i)
                 i -= 1
                 continue
@@ -211,8 +181,6 @@ ti2_cull_overlaps_same_tf() =>
                 ZoneData zr = array.get(active_zones, remove_index)
                 if not na(zr.zone_box)
                     box.delete(zr.zone_box)
-                // TI-10: cleanup map entry for the culled zone
-                cleanup_rejection_for_zone(zr)  // TI-10
                 array.remove(active_zones, remove_index)
                 if not keep_i
                     if i < array.size(active_zones)
@@ -285,7 +253,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                     if wick_ok and size_ok
                         small_count += 1
                         idx += 1
-                        continue
                     else
                         break
 
@@ -334,14 +301,35 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                             ZoneData oldest = array.pop(active_zones)
                             if not na(oldest.zone_box)
                                 box.delete(oldest.zone_box)
-                            // TI-10: cleanup map entry for the dropped oldest zone
-                            cleanup_rejection_for_zone(oldest)  // TI-10
 
                         ti2_cull_overlaps_same_tf()
 
 // === TI-7: Rejection detection helpers and function ===
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
+
+// === TI-9: position context stored in arrays to allow mutation inside functions ===
+var pos_tf_label_arr    = array.new_string()
+var pos_zone_type_arr   = array.new_string()
+var pos_zone_top_arr    = array.new_float()
+var pos_zone_bottom_arr = array.new_float()
+if barstate.isfirst  // TI-9
+    array.push(pos_tf_label_arr, "")
+    array.push(pos_zone_type_arr, "")
+    array.push(pos_zone_top_arr, na)
+    array.push(pos_zone_bottom_arr, na)
+
+set_position_context(tf_lbl, z_type, z_top, z_bottom) =>  // TI-9
+    array.set(pos_tf_label_arr, 0, tf_lbl)
+    array.set(pos_zone_type_arr, 0, z_type)
+    array.set(pos_zone_top_arr, 0, z_top)
+    array.set(pos_zone_bottom_arr, 0, z_bottom)
+
+clear_position_context() =>  // TI-9
+    array.set(pos_tf_label_arr, 0, "")
+    array.set(pos_zone_type_arr, 0, "")
+    array.set(pos_zone_top_arr, 0, na)
+    array.set(pos_zone_bottom_arr, 0, na)
 
 detect_rejections() =>
     if array.size(active_zones) > 0
@@ -350,6 +338,10 @@ detect_rejections() =>
         float body = math.abs(close - open)
         bool green = close > open
         bool red   = close < open
+
+        // TI-10: previous bar color for engulfing checks (B must engulf prior red, S must engulf prior green)
+        bool prev_green = close[1] > open[1]
+        bool prev_red   = close[1] < open[1]
 
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
@@ -362,29 +354,63 @@ detect_rejections() =>
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong  = green and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_up and strong
+                bool bullish_engulf_ok = true
+                if prev_red
+                    bullish_engulf_ok := (open <= close[1]) and (close >= open[1])   // TI-10
+
+                if alerts_on_departure and touched and left_up and strong and bullish_engulf_ok
                     float level_d = z.top
                     label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
-                    // TI-10: increment this zone's rejection count and reflect it in the box text
-                    string keyD = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)          // TI-10
-                    int newCntD = ti10_inc_and_get(keyD)                                                           // TI-10
-                    if not na(z.zone_box)
-                        box.set_text(z.zone_box, z.label_text + " | R:" + str.tostring(newCntD))                   // TI-10
                     alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_d, format.mintick), alert.freq_once_per_bar_close)
+
+                    // === TI-9: Enter LONG on B alert, set SL by zone size, remember zone TF/type via context arrays ===
+                    if strategy.position_size == 0
+                        float zone_sz = z.top - z.bottom
+                        float sl_long  = z.bottom - zone_sz * sl_zone_pct
+                        strategy.entry("LONG", strategy.long)
+                        strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long)
+                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom)  // TI-9
 
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong  = red and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_dn and strong
+                bool bearish_engulf_ok = true
+                if prev_green
+                    bearish_engulf_ok := (open >= close[1]) and (close <= open[1])     // TI-10
+
+                if alerts_on_departure and touched and left_dn and strong and bearish_engulf_ok
                     float level_s = z.bottom
                     label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
-                    // TI-10: increment this zone's rejection count and reflect it in the box text
-                    string keyS = zone_key(z.zone_type, z.tf_label, z.creation_bar_time, z.top, z.bottom)          // TI-10
-                    int newCntS = ti10_inc_and_get(keyS)                                                           // TI-10
-                    if not na(z.zone_box)
-                        box.set_text(z.zone_box, z.label_text + " | R:" + str.tostring(newCntS))                   // TI-10
                     alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
+
+                    // === TI-9: Enter SHORT on S alert, set SL by zone size, remember zone TF/type via context arrays ===
+                    if strategy.position_size == 0
+                        float zone_szS = z.top - z.bottom
+                        float sl_short = z.top + zone_szS * sl_zone_pct
+                        strategy.entry("SHORT", strategy.short)
+                        strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short)
+                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom)  // TI-9
+
+// === TI-9 FIX: remove `return`; branch instead so Pine doesn’t error ===
+manage_exits_same_tf() =>
+    if strategy.position_size == 0
+        clear_position_context()
+    else
+        string ctx_tf   = array.get(pos_tf_label_arr, 0)
+        string ctx_type = array.get(pos_zone_type_arr, 0)
+        if ctx_tf != "" and ctx_type != ""
+            for i = 0 to array.size(active_zones) - 1
+                ZoneData z = array.get(active_zones, i)
+                if z.tf_label == ctx_tf
+                    if strategy.position_size > 0 and z.zone_type == "Supply" and high >= z.bottom
+                        strategy.close("LONG")
+                        clear_position_context()
+                        break
+                    if strategy.position_size < 0 and z.zone_type == "Demand" and low <= z.top
+                        strategy.close("SHORT")
+                        clear_position_context()
+                        break
 
 // === Main orchestration placed at the bottom ===
 main() =>
@@ -398,7 +424,8 @@ main() =>
         detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
     update_zones()
-    detect_rejections() // TI-7
+    detect_rejections()      // TI-7 (+ TI-10 engulfing & TI-9 entries)
+    manage_exits_same_tf()   // TI-9
 
 // === Run main ===
 main()

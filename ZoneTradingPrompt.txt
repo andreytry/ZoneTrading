@@ -450,13 +450,20 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 Enter Long position when B alert is generated.
 stoploss below the zone at 30% of the zone size (setting Stoploss distance percent of zone size) 
 Exit position when reached supply zone of the same level (M1, M15, M15... ) as the demand zone from where the price rejected
+when a short entry conditions fulfilled exit the position and open the short one
 
 Enter Short position when S alert is generated.
 stoploss above the zone at 30% of the zone size (setting Stoploss distance percent of zone size) 
 Exit position when reached demand zone of the same level (M1, M15, M15... ) as the supply zone from where the price rejected
+ when a long entry conditions fulfilled close the position and open the long one
 
 
+Mark each entry with YYYYMMDDHHMISS.SSS   mark each position exit with the same ID as corresponding entry
+NO OTHER LABELS EXCEPT FOR THE B and S !!!!!
 
+
+Generate B emtry when the price has formed a demand zone and departed with a strong caldne (Rejection candle min body)
+Generate S emtry when the price has formed a supply zone and departed with a strong caldne (Rejection candle min body)
 
 Mark the changes with user story ID: TI-9
 
@@ -473,7 +480,7 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 
 =================================
 //TI-11 preferred and extended version of the zone
-
+1
 update the script
 For demand zone identify upper boundary as follows:
 If the Checkbox "Use extended version of the zone" is checked then the upper bound of the zone is 
