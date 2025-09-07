@@ -462,8 +462,8 @@ Mark each entry with YYYYMMDDHHMISS.SSS   mark each position exit with the same 
 NO OTHER LABELS EXCEPT FOR THE B and S !!!!!
 
 
-Generate B emtry when the price has formed a demand zone and departed with a strong caldne (Rejection candle min body)
-Generate S emtry when the price has formed a supply zone and departed with a strong caldne (Rejection candle min body)
+Generate B emtry when the price has formed a demand zone and departed with a strong caldne (Rejection candle min body) close Short position if exists and open Long
+Generate S emtry when the price has formed a supply zone and departed with a strong caldne (Rejection candle min body) close Long position if exists and open short
 
 Mark the changes with user story ID: TI-9
 
@@ -502,7 +502,7 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 
 
 =================================
-//TI-12 engoulding on rejection
+//TI-14 (prev TI-12) engoulding on rejection
 
 update the script
 Add the following condition for B:
@@ -522,3 +522,56 @@ Never change the name of the indicator!!!
 The code you generate must be syntactycally correct pinescript , compile without errors
 Never use the functions that are not in the standard library, like math.inf
 DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+
+
+
+
+=================================
+//TI-3 EMA as a confluence
+
+update the script
+
+Enter LONG when
+EMA50 is above EMA100
+The price crosses EMA 100 with a green candle, which size is minimum  (Rejection Candle Min Body (xATR) setting)
+This candle has open in a demand zone
+Stoploss below the demand zone - 30% of the zone size (setting Stoploss distance percent of zone size) 
+Takeprofit R3
+
+
+Enter SHORT when
+EMA50 is below EMA100
+The price crosses EMA 100 with a red candle, which size is minimum  (Rejection Candle Min Body (xATR) setting)
+This candle has open in a supply zone
+Stoploss above the supply zone + 30% of the zone size (setting Stoploss distance percent of zone size) 
+Takeprofit R3
+
+Risk management: 
+Stoploss to breakeven when 1R reached
+Visualize the entry with the dark green rectange beween entry and TO, purple rectange between entry and SL - standard represnetation in TradingView
+
+
+
+Add the following condition for S:
+if the strong green candle departing the zone follows a red candle , it must engulf it
+
+
+Mark the changes with user story ID: TI-3
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+
+REJECTION FROM EMA20/50/100 IS A PRIO!!! 
+
+ZONE INVALIDATION IS A PRIO!!!!!
