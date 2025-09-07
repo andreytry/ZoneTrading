@@ -1,5 +1,5 @@
 //@version=5 
-strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500) // TI-9: turned into strategy (title unchanged)
+indicator("Supply/Demand Zones (Wick-Based, Dynamic Extension)", overlay=true, max_boxes_count=500)
 
 // === Constants ===
 HISTORY_LENGTH = 500
@@ -33,12 +33,6 @@ range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1,
 rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minval=0.0, step=0.05, group=group_params)
 // === TI-7: Alert toggle (default OFF) ===
 alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
-
-// === TI-9: Trading settings ===
-group_ti9 = "TI-9 Trading"
-ti9_enable_trading  = input.bool(true,  "Enable TI-9 trading", group=group_ti9) // TI-9
-ti9_sl_offset_pct   = input.float(30.0, "Stop-loss offset (% of zone height beyond boundary)", minval=0.0, step=0.1, group=group_ti9) // TI-9
-ti9_min_rr          = input.float(1.0,  "Minimum RR to next opposite zone", minval=0.0, step=0.1, group=group_ti9) // TI-9
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -344,142 +338,6 @@ detect_rejections() =>
                     label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
                     alert("Price of " + syminfo.ticker + " rejected from the level ..... " + str.tostring(level_s, format.mintick), alert.freq_once_per_bar_close)
 
-// === TI-9: Zone search helpers for entries/targets ===
-find_entry_zone_idx(zoneType) =>
-    int best = -1
-    
-    float bestDist = 1e10 // TI-9
-    float atr_now = ta.atr(atr_length)
-    float max_h = atr_now * rejection_atr_mult
-    int n = array.size(active_zones)
-    if n > 0
-        for i = 0 to n - 1
-            ZoneData z = array.get(active_zones, i)
-            if z.zone_type == zoneType
-                float zh = z.top - z.bottom
-                bool touch_in = within_zone(close, z.top, z.bottom) or (zoneType == "Demand" ? (low <= z.top and low >= z.bottom) : (high >= z.bottom and high <= z.top))
-                if touch_in and zh <= max_h
-                    float mid = (z.top + z.bottom) * 0.5
-                    float d = math.abs(close - mid)
-                    if d < bestDist
-                        bestDist := d
-                        best := i
-    best // TI-9
-
-find_next_zone_above_idx(price, zoneType) =>
-    int best = -1
-    float bestDelta = 1e10 // TI-9
-    int n = array.size(active_zones)
-    if n > 0
-        for i = 0 to n - 1
-            ZoneData z = array.get(active_zones, i)
-            if z.zone_type == zoneType
-                float anchor = zoneType == "Supply" ? z.bottom : z.top
-                float delta = anchor - price
-                if delta > 0 and delta < bestDelta
-                    bestDelta := delta
-                    best := i
-    best // TI-9
-
-find_next_zone_below_idx(price, zoneType) =>
-    int best = -1
-    float bestDelta = 1e10 // TI-9
-    int n = array.size(active_zones)
-    if n > 0
-        for i = 0 to n - 1
-            ZoneData z = array.get(active_zones, i)
-            if z.zone_type == zoneType
-                float anchor = zoneType == "Demand" ? z.top : z.bottom
-                float delta = price - anchor
-                if delta > 0 and delta < bestDelta
-                    bestDelta := delta
-                    best := i
-    best // TI-9
-
-// === TI-9: Core trading logic: entries, TP at next opposite zone, SL from zone ±30%, BE at 50% to target ===
-do_ti9_trading() =>
-    if ti9_enable_trading
-        float atr_now = ta.atr(atr_length)
-        // Persistent per-side state
-        var float longSL  = na
-        var float longTP  = na
-        var bool  longBE  = false
-        var float shortSL = na
-        var float shortTP = na
-        var bool  shortBE = false
-
-        // Reset BE flags when flat
-        if strategy.position_size == 0
-            longBE  := false
-            shortBE := false
-
-        // Manage existing positions: move SL to BE at 50% to target, keep TP at zone
-        if strategy.position_size > 0 and not na(longTP)
-            float ep = strategy.position_avg_price
-            float beTrig = ep + 0.5 * (longTP - ep)
-            if high >= beTrig and not longBE
-                longSL := ep  // move to BE
-                longBE := true
-            // Re-issue exits each bar
-            if not na(longSL)
-                strategy.exit("Long-Exit", from_entry="Long", stop=longSL, limit=longTP)
-        if strategy.position_size < 0 and not na(shortTP)
-            float epS = strategy.position_avg_price
-            float beTrigS = epS - 0.5 * (epS - shortTP)
-            if low <= beTrigS and not shortBE
-                shortSL := epS // move to BE
-                shortBE := true
-            if not na(shortSL)
-                strategy.exit("Short-Exit", from_entry="Short", stop=shortSL, limit=shortTP)
-
-        // Entries only if flat
-        bool flat = strategy.position_size == 0
-
-        if flat
-            // ===== LONG setup =====
-            int dIdx = find_entry_zone_idx("Demand")
-            if dIdx != -1
-                ZoneData dZ = array.get(active_zones, dIdx)
-                float zh  = dZ.top - dZ.bottom
-                float off = zh * (ti9_sl_offset_pct / 100.0)
-                float sl  = dZ.bottom - off
-                float ep  = close
-                float risk = ep - sl
-                // Next supply zone above for TP (use its bottom)
-                int sIdx = find_next_zone_above_idx(ep, "Supply")
-                if sIdx != -1 and risk > 0
-                    ZoneData sZ = array.get(active_zones, sIdx)
-                    float tp = sZ.bottom
-                    bool rr_ok = (tp - ep) >= ti9_min_rr * risk
-                    if rr_ok
-                        strategy.entry("Long", strategy.long)          // TI-9
-                        longSL := sl
-                        longTP := tp
-                        longBE := false
-                        strategy.exit("Long-Exit", from_entry="Long", stop=longSL, limit=longTP) // TI-9
-
-            // ===== SHORT setup =====
-            int sIdxE = find_entry_zone_idx("Supply")
-            if sIdxE != -1 and flat and strategy.position_size == 0
-                ZoneData sZE = array.get(active_zones, sIdxE)
-                float zh2  = sZE.top - sZE.bottom
-                float off2 = zh2 * (ti9_sl_offset_pct / 100.0)
-                float sl2  = sZE.top + off2
-                float ep2  = close
-                float risk2 = sl2 - ep2
-                // Next demand zone below for TP (use its top)
-                int dIdxT = find_next_zone_below_idx(ep2, "Demand")
-                if dIdxT != -1 and risk2 > 0
-                    ZoneData dZT = array.get(active_zones, dIdxT)
-                    float tp2 = dZT.top
-                    bool rr_ok2 = (ep2 - tp2) >= ti9_min_rr * risk2
-                    if rr_ok2
-                        strategy.entry("Short", strategy.short)        // TI-9
-                        shortSL := sl2
-                        shortTP := tp2
-                        shortBE := false
-                        strategy.exit("Short-Exit", from_entry="Short", stop=shortSL, limit=shortTP) // TI-9
-
 // === Main orchestration placed at the bottom ===
 main() =>
     if show_60
@@ -493,7 +351,6 @@ main() =>
 
     update_zones()
     detect_rejections() // TI-7
-    do_ti9_trading()    // TI-9
 
 // === Run main ===
 main()
