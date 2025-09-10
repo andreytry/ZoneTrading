@@ -1,5 +1,6 @@
 //@version=5
-// TI-9: switch to strategy to place orders (keeps the same script title)
+// TI-9: place trades also *when a new zone is formed* (strong departure candle)
+// Title unchanged per requirement
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
 // === Constants ===
@@ -35,14 +36,8 @@ rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minv
 // === TI-7: Alert toggle (default OFF) ===
 alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
 
-// === TI-9: Stop loss distance as % of zone height (outside the zone) ===
-sl_zone_pct = input.float(0.30, "Stoploss distance percent of zone size", minval=0.0, step=0.01, group=group_params) // TI-9
-
-// === TI-3: EMA settings & values (EMA50/EMA100 by default) ===
-ema_fast_len = input.int(50, "EMA_FAST Length", minval=1, group=group_params) // TI-3
-ema_slow_len = input.int(100, "EMA_SLOW Length", minval=1, group=group_params) // TI-3
-ema_fast_val = ta.ema(close, ema_fast_len) // TI-3
-ema_slow_val = ta.ema(close, ema_slow_len) // TI-3
+// === TI-9: Stop loss distance as % of zone height (outside the zone)
+sl_zone_pct = input.float(0.30, "Stoploss distance percent of zone size", minval=0.0, step=0.01, group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open, _close) => math.abs(_close - _open)
@@ -193,6 +188,46 @@ ti2_cull_overlaps_same_tf() =>
                 j += 1
         i += 1
 
+// === TI-9: position context & entry IDs (arrays for safe mutation inside functions)
+var pos_tf_label_arr    = array.new_string()
+var pos_zone_type_arr   = array.new_string()
+var pos_zone_top_arr    = array.new_float()
+var pos_zone_bottom_arr = array.new_float()
+var pos_entry_id_arr    = array.new_string()
+if barstate.isfirst
+    array.push(pos_tf_label_arr, "")
+    array.push(pos_zone_type_arr, "")
+    array.push(pos_zone_top_arr, na)
+    array.push(pos_zone_bottom_arr, na)
+    array.push(pos_entry_id_arr, "")
+
+set_position_context(tf_lbl, z_type, z_top, z_bottom, entry_id) =>
+    array.set(pos_tf_label_arr, 0, tf_lbl)
+    array.set(pos_zone_type_arr, 0, z_type)
+    array.set(pos_zone_top_arr, 0, z_top)
+    array.set(pos_zone_bottom_arr, 0, z_bottom)
+    array.set(pos_entry_id_arr, 0, entry_id)
+
+clear_position_context() =>
+    array.set(pos_tf_label_arr, 0, "")
+    array.set(pos_zone_type_arr, 0, "")
+    array.set(pos_zone_top_arr, 0, na)
+    array.set(pos_zone_bottom_arr, 0, na)
+    array.set(pos_entry_id_arr, 0, "")
+
+// === TI-9: build entry/exit ID "YYYYMMDDHHMISS.SSS"
+zero2(n) => n < 10 ? "0" + str.tostring(n) : str.tostring(n)
+zero3(n) => n < 10 ? "00" + str.tostring(n) : n < 100 ? "0" + str.tostring(n) : str.tostring(n)
+make_trade_id() =>
+    string y  = str.tostring(year)
+    string mo = zero2(month)
+    string d  = zero2(dayofmonth)
+    string h  = zero2(hour)
+    string mi = zero2(minute)
+    string s  = zero2(second)
+    int ms    = int(math.round(time % 1000))
+    y + mo + d + h + mi + s + "." + zero3(ms)
+
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
     string actual_tf = tf == "" ? timeframe.period : tf
@@ -217,10 +252,6 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
             float min_long_body = cur_atr * long_atr_filter
 
             if cur_body >= min_long_body
-                int   mark_time = array.get(time_hist, 0)
-                float hi0       = array.get(high_hist, 0)
-                float lo0       = array.get(low_hist, 0)
-
                 string cur_color = is_green_mtf(cur_open, cur_close) ? "green" : is_red_mtf(cur_open, cur_close) ? "red" : "na"
 
                 int small_count = 0
@@ -303,91 +334,48 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
 
                         ti2_cull_overlaps_same_tf()
 
+                        // ===== TI-9: TAKE POSITION WHEN A NEW ZONE IS FORMED (strong departure candle) =====
+                        float zone_h = zone_top - zone_bottom
+
+                        // DEMAND → enter/reverse LONG, draw only "B" label (no other labels)
+                        if zone_type == "Demand"
+                            if strategy.position_size < 0
+                                string exit_idS = array.get(pos_entry_id_arr, 0)
+                                strategy.close("SHORT", comment=exit_idS)
+                                clear_position_context()
+                            if strategy.position_size <= 0
+                                string new_id = make_trade_id()
+                                float sl_long = zone_bottom - zone_h * sl_zone_pct
+                                strategy.entry("LONG", strategy.long, comment=new_id)
+                                strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long, comment=new_id)
+                                set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_id)
+                                if alerts_on_departure
+                                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                                    // TI-18: Alerts when and only when B sign appears (with volume)
+                                    alert("B "+syminfo.ticker+" "+display_tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+
+                        // SUPPLY → enter/reverse SHORT, draw only "S" label (no other labels)
+                        if zone_type == "Supply"
+                            if strategy.position_size > 0
+                                string exit_idL = array.get(pos_entry_id_arr, 0)
+                                strategy.close("LONG", comment=exit_idL)
+                                clear_position_context()
+                            if strategy.position_size >= 0
+                                string new_idS = make_trade_id()
+                                float sl_short = zone_top + zone_h * sl_zone_pct
+                                strategy.entry("SHORT", strategy.short, comment=new_idS)
+                                strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short, comment=new_idS)
+                                set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_idS)
+                                if alerts_on_departure
+                                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                                    // TI-18: Alerts when and only when S sign appears (with volume)
+                                    alert("S "+syminfo.ticker+" "+display_tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+
 // === TI-7: Rejection detection helpers and function ===
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
-// === TI-9: position context & entry IDs in arrays (mutable in functions)
-var pos_tf_label_arr    = array.new_string()
-var pos_zone_type_arr   = array.new_string()
-var pos_zone_top_arr    = array.new_float()
-var pos_zone_bottom_arr = array.new_float()
-var pos_entry_id_arr    = array.new_string()
-if barstate.isfirst
-    array.push(pos_tf_label_arr, "")
-    array.push(pos_zone_type_arr, "")
-    array.push(pos_zone_top_arr, na)
-    array.push(pos_zone_bottom_arr, na)
-    array.push(pos_entry_id_arr, "")
-
-// === TI-3: rectangles to visualize R/SL (one active set) ===
-var array<box> pos_tp_box_arr = array.new<box>() // TI-3
-var array<box> pos_sl_box_arr = array.new<box>() // TI-3
-if barstate.isfirst
-    array.push(pos_tp_box_arr, na) // TI-3
-    array.push(pos_sl_box_arr, na) // TI-3
-
-set_position_context(tf_lbl, z_type, z_top, z_bottom, entry_id) =>
-    array.set(pos_tf_label_arr, 0, tf_lbl)
-    array.set(pos_zone_type_arr, 0, z_type)
-    array.set(pos_zone_top_arr, 0, z_top)
-    array.set(pos_zone_bottom_arr, 0, z_bottom)
-    array.set(pos_entry_id_arr, 0, entry_id)
-
-clear_position_boxes() =>
-    box btp = array.get(pos_tp_box_arr, 0) // TI-3
-    box bsl = array.get(pos_sl_box_arr, 0) // TI-3
-    if not na(btp)
-        box.delete(btp)
-    if not na(bsl)
-        box.delete(bsl)
-    array.set(pos_tp_box_arr, 0, na) // TI-3
-    array.set(pos_sl_box_arr, 0, na) // TI-3
-
-set_position_boxes(entry, tp, sl) =>
-    color profit_bg = color.new(color.green, 80) // TI-3
-    color loss_bg   = color.new(color.purple, 80) // TI-3
-    float top_tp = math.max(entry, tp) // TI-3
-    float bot_tp = math.min(entry, tp) // TI-3
-    float top_sl = math.max(entry, sl) // TI-3
-    float bot_sl = math.min(entry, sl) // TI-3
-    box new_tp = box.new(bar_index, top_tp, bar_index, bot_tp, border_color=color.new(color.green, 100), bgcolor=profit_bg) // TI-3
-    box new_sl = box.new(bar_index, top_sl, bar_index, bot_sl, border_color=color.new(color.purple, 100), bgcolor=loss_bg) // TI-3
-    array.set(pos_tp_box_arr, 0, new_tp) // TI-3
-    array.set(pos_sl_box_arr, 0, new_sl) // TI-3
-
-update_position_boxes(entry, tp, sl) =>
-    box btp = array.get(pos_tp_box_arr, 0) // TI-3
-    box bsl = array.get(pos_sl_box_arr, 0) // TI-3
-    if not na(btp)
-        box.set_righttop(btp, bar_index, math.max(entry, tp))
-        box.set_rightbottom(btp, bar_index, math.min(entry, tp))
-    if not na(bsl)
-        box.set_righttop(bsl, bar_index, math.max(entry, sl))
-        box.set_rightbottom(bsl, bar_index, math.min(entry, sl))
-
-clear_position_context() =>
-    clear_position_boxes() // TI-3
-    array.set(pos_tf_label_arr, 0, "")
-    array.set(pos_zone_type_arr, 0, "")
-    array.set(pos_zone_top_arr, 0, na)
-    array.set(pos_zone_bottom_arr, 0, na)
-    array.set(pos_entry_id_arr, 0, "")
-
-// === TI-9: build entry/exit ID "YYYYMMDDHHMISS.SSS"
-zero2(n) => n < 10 ? "0" + str.tostring(n) : str.tostring(n)
-zero3(n) => n < 10 ? "00" + str.tostring(n) : n < 100 ? "0" + str.tostring(n) : str.tostring(n)
-make_trade_id() =>
-    string y  = str.tostring(year)
-    string mo = zero2(month)
-    string d  = zero2(dayofmonth)
-    string h  = zero2(hour)
-    string mi = zero2(minute)
-    string s  = zero2(second)
-    int ms    = int(math.round(time % 1000))
-    y + mo + d + h + mi + s + "." + zero3(ms)
-
-// === Signal detector updated for TI-3 EMA confluence, R3 target, 1R→BE, rectangles ===
+// (kept; still can generate B/S on retests; no extra labels beyond B/S)
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
@@ -396,118 +384,45 @@ detect_rejections() =>
         bool green = close > open
         bool red   = close < open
 
-        // Engulfing helper for shorts (current red after green must engulf previous bar) — TI-3
-        bool prev_green = close[1] > open[1]
-        bool red_engulfs_prev_green = (high >= high[1]) and (low <= low[1])
-
         for i = 0 to array.size(active_zones) - 1
             ZoneData z = array.get(active_zones, i)
-            bool open_in_zone = within_zone(open, z.top, z.bottom) // TI-3
-            bool ema_in_zone  = within_zone(ema_fast_val, z.top, z.bottom) or within_zone(ema_slow_val, z.top, z.bottom) // TI-3
+            bool after_legout = time > z.legout_time
+            if not after_legout
+                continue
 
-            // === DEMAND → B (enter LONG) with EMA confluence — TI-3
             if z.zone_type == "Demand"
-                bool cond_long = (ema_fast_val > ema_slow_val) and green and (body >= min_reject_body) and open_in_zone and ema_in_zone // TI-3
-                if alerts_on_departure and cond_long
-                    // Keep ONLY B label
+                bool touched = low <= z.top
+                bool left_up = close > z.top
+                bool strong  = green and (body >= min_reject_body)
+                if alerts_on_departure and touched and left_up and strong
                     label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
+                    // TI-18: Alerts when and only when B sign appears (with volume)
+                    alert("B "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
 
-                    string new_id = make_trade_id()
-
-                    // reverse if short
-                    if strategy.position_size < 0
-                        string exit_id = array.get(pos_entry_id_arr, 0)
-                        strategy.close("SHORT", comment=exit_id)
-                        clear_position_context()
-
-                    // enter long (if flat or short just closed)
-                    if strategy.position_size <= 0
-                        float zone_sz = z.top - z.bottom
-                        float sl_long = z.bottom - zone_sz * sl_zone_pct
-                        float entry_long = close
-                        float r_long = entry_long - sl_long
-                        float tp_long = entry_long + 3.0 * r_long
-                        strategy.entry("LONG", strategy.long, comment=new_id)
-                        strategy.exit("LONG-EXIT", from_entry="LONG", stop=sl_long, limit=tp_long, comment=new_id) // TI-3
-                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom, new_id)
-                        set_position_boxes(entry_long, tp_long, sl_long) // TI-3
-
-            // === SUPPLY → S (enter SHORT) with EMA confluence & engulf rule — TI-3
             if z.zone_type == "Supply"
-                bool engulf_ok = (not prev_green) or red_engulfs_prev_green // TI-3
-                bool cond_short = (ema_fast_val < ema_slow_val) and red and (body >= min_reject_body) and open_in_zone and ema_in_zone and engulf_ok // TI-3
-                if alerts_on_departure and cond_short
-                    // Keep ONLY S label
+                bool touched = high >= z.bottom
+                bool left_dn = close < z.bottom
+                bool strong  = red and (body >= min_reject_body)
+                if alerts_on_departure and touched and left_dn and strong
                     label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
+                    // TI-18: Alerts when and only when S sign appears (with volume)
+                    alert("S "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
 
-                    string new_idS = make_trade_id()
-
-                    // reverse if long
-                    if strategy.position_size > 0
-                        string exit_id2 = array.get(pos_entry_id_arr, 0)
-                        strategy.close("LONG", comment=exit_id2)
-                        clear_position_context()
-
-                    // enter short (if flat or long just closed)
-                    if strategy.position_size >= 0
-                        float zone_szS = z.top - z.bottom
-                        float sl_short = z.top + zone_szS * sl_zone_pct
-                        float entry_short = close
-                        float r_short = sl_short - entry_short
-                        float tp_short = entry_short - 3.0 * r_short
-                        strategy.entry("SHORT", strategy.short, comment=new_idS)
-                        strategy.exit("SHORT-EXIT", from_entry="SHORT", stop=sl_short, limit=tp_short, comment=new_idS) // TI-3
-                        set_position_context(z.tf_label, z.zone_type, z.top, z.bottom, new_idS)
-                        set_position_boxes(entry_short, tp_short, sl_short) // TI-3
-
-// === TI-3: dynamic risk management — 1R→BE and rectangle updates ===
-manage_risk_rr() =>
-    if strategy.position_size != 0
-        string ztype = array.get(pos_zone_type_arr, 0)
-        float ztop   = array.get(pos_zone_top_arr, 0)
-        float zbot   = array.get(pos_zone_bottom_arr, 0)
-        string eid   = array.get(pos_entry_id_arr, 0)
-        if eid != "" and not na(ztop) and not na(zbot)
-            float entry = strategy.position_avg_price
-            if strategy.position_size > 0
-                // LONG
-                float init_sl = zbot - (ztop - zbot) * sl_zone_pct
-                float R = entry - init_sl
-                float tp = entry + 3.0 * R
-                float be_trig = entry + R
-                float dyn_stop = high >= be_trig ? entry : init_sl
-                strategy.exit("LONG-EXIT", from_entry="LONG", stop=dyn_stop, limit=tp, comment=eid)
-                update_position_boxes(entry, tp, dyn_stop)
-            else
-                // SHORT
-                float init_sl_s = ztop + (ztop - zbot) * sl_zone_pct
-                float R_s = init_sl_s - entry
-                float tp_s = entry - 3.0 * R_s
-                float be_trig_s = entry - R_s
-                float dyn_stop_s = low <= be_trig_s ? entry : init_sl_s
-                strategy.exit("SHORT-EXIT", from_entry="SHORT", stop=dyn_stop_s, limit=tp_s, comment=eid)
-                update_position_boxes(entry, tp_s, dyn_stop_s)
-    else
-        // flat: ensure rectangles & context are cleared if any
-        if array.get(pos_entry_id_arr, 0) != ""
-            clear_position_context()
-
-// === TI-9: exit when reaching opposite zone of the same TF; exit carries the same entry ID
+// === TI-9: exit when reaching opposite zone of the same timeframe label
 manage_exits_same_tf() =>
     if strategy.position_size != 0
         string ctx_tf   = array.get(pos_tf_label_arr, 0)
-        string ctx_type = array.get(pos_zone_type_arr, 0)
         string ctx_id   = array.get(pos_entry_id_arr, 0)
-        if ctx_tf != "" and ctx_type != "" and ctx_id != ""
+        if ctx_tf != "" and ctx_id != ""
             for i = 0 to array.size(active_zones) - 1
                 ZoneData z = array.get(active_zones, i)
                 if z.tf_label == ctx_tf
-                    // Long: exit at Supply zone (same TF)
+                    // Long: exit at Supply zone of same TF
                     if strategy.position_size > 0 and z.zone_type == "Supply" and high >= z.bottom
                         strategy.close("LONG", comment=ctx_id)
                         clear_position_context()
                         break
-                    // Short: exit at Demand zone (same TF)
+                    // Short: exit at Demand zone of same TF
                     if strategy.position_size < 0 and z.zone_type == "Demand" and low <= z.top
                         strategy.close("SHORT", comment=ctx_id)
                         clear_position_context()
@@ -525,9 +440,8 @@ main() =>
         detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
     update_zones()
-    detect_rejections()     // TI-3: entries via EMA confluence + R3 target + rectangles + engulf rule (S)
-    manage_risk_rr()        // TI-3: dynamic 1R→BE and rectangle updates
-    manage_exits_same_tf()  // TI-9: optional exit on opposite zone (same TF) — left intact
+    detect_rejections()     // only draws B/S labels on retests if enabled (alerts tied to labels) // TI-18
+    manage_exits_same_tf()  // exit at opposite zone (same TF)
 
 // === Run main ===
 main()
