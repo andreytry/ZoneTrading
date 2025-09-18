@@ -647,3 +647,161 @@ Dont modify global vriables inside a function
 REJECTION FROM EMA20/50/100 IS A PRIO!!! 
 
 ZONE INVALIDATION IS A PRIO!!!!!
+
+
+
+
+=================================
+//TI-21 Control Strategy by the same toggles as B and S
+
+update the script
+
+control strategy turning on and off by the same toggle "Alert on zone departure" as B and S LABELS
+Rename "Alert on zone departure"   to "Show entry points"
+
+
+
+
+Mark the changes with user story ID in the comment above
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+
+REJECTION FROM EMA20/50/100 IS A PRIO!!! 
+
+ZONE INVALIDATION IS A PRIO!!!!!
+
+
+
+
+=================================
+//TI-22 Alerts only on B and S
+
+update the script
+
+Update the code, the alert should be fired WHEN and ONLY WHEN the B or S labels are generated
+no other events trigger an alert
+update these and any other appropritate places:
+if z.zone_type == "Demand"
+    bool touched = low <= z.top
+    bool left_up = close > z.top
+    bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+    if alerts_on_departure and touched and left_up and strong_up
+        label.new(bar_index, low, "B", ...)
+        alert("B "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close)
+
+if z.zone_type == "Supply"
+    bool touched = high >= z.bottom
+    bool left_dn = close < z.bottom
+    bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+    if alerts_on_departure and touched and left_dn and strong_dn
+        label.new(bar_index, high, "S", ...)
+        alert("S "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close)
+
+
+
+
+Mark the changes with user story ID in the comment above
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+=================================
+//TI-24 Alerts only on B/S
+
+update the script
+
+Update the code, the alert should be fired WHEN and ONLY WHEN the B or S labels are generated
+no other events trigger an alert
+update these and any other appropritate places:
+if z.zone_type == "Demand"
+    bool touched = low <= z.top
+    bool left_up = close > z.top
+    bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+    if alerts_on_departure and touched and left_up and strong_up
+        label.new(bar_index, low, "B", ...)
+        alert("B "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close)
+
+if z.zone_type == "Supply"
+    bool touched = high >= z.bottom
+    bool left_dn = close < z.bottom
+    bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+    if alerts_on_departure and touched and left_dn and strong_dn
+        label.new(bar_index, high, "S", ...)
+        alert("S "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close)
+
+
+
+
+Mark the changes with user story ID in the comment above
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+=================================
+//TI-26 Separate toggles for B/S and the strategy
+
+update the script
+
+There should be two distinct checkboxes controlling B/S label and the strategy
+For B/S:  Show entries, default true
+For the strategy: Execute strategy, default false
+
+
+
+Mark the changes with user story ID in the comment above
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+
+
+
+
+REJECTION FROM EMA20/50/100 IS A PRIO!!! 
+
+ZONE INVALIDATION IS A PRIO!!!!!
+
+
+

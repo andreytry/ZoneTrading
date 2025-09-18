@@ -1,5 +1,6 @@
 //@version=5
 // TI-9: place trades also *when a new zone is formed* (strong departure candle)
+// TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
 // Title unchanged per requirement
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
@@ -228,6 +229,13 @@ make_trade_id() =>
     int ms    = int(math.round(time % 1000))
     y + mo + d + h + mi + s + "." + zero3(ms)
 
+// === TI-22: helper that ALWAYS couples label creation with alert; used everywhere B/S labels are drawn
+make_label_and_alert(sig, y, tf_lbl) =>
+    color c = sig == "B" ? color.new(color.green, 0) : color.new(color.red, 0) // TI-22
+    label_style = sig == "B" ? label.style_label_up : label.style_label_down    // TI-22
+    label.new(bar_index, y, sig, color=c, textcolor=color.white, style=label_style, size=size.tiny) // TI-22
+    alert(sig+" "+syminfo.ticker+" "+tf_lbl+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-22
+
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
     string actual_tf = tf == "" ? timeframe.period : tf
@@ -350,9 +358,8 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                 strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long, comment=new_id)
                                 set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_id)
                                 if alerts_on_departure
-                                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
-                                    // TI-18: Alerts when and only when B sign appears (with volume)
-                                    alert("B "+syminfo.ticker+" "+display_tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+                                    // TI-22: alert only when B is drawn
+                                    make_label_and_alert("B", low, display_tf_label)
 
                         // SUPPLY → enter/reverse SHORT, draw only "S" label (no other labels)
                         if zone_type == "Supply"
@@ -367,20 +374,23 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                                 strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short, comment=new_idS)
                                 set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_idS)
                                 if alerts_on_departure
-                                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
-                                    // TI-18: Alerts when and only when S sign appears (with volume)
-                                    alert("S "+syminfo.ticker+" "+display_tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+                                    // TI-22: alert only when S is drawn
+                                    make_label_and_alert("S", high, display_tf_label)
 
 // === TI-7: Rejection detection helpers and function ===
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
-// (kept; still can generate B/S on retests; no extra labels beyond B/S)
+// (kept; still can generate B/S on retests; alerts tied strictly to label creation)
+// TI-22: Alerts only on B and S — emit alert ONLY alongside the label
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
         float min_reject_body = atr_now * rejection_atr_mult
+        // TI-20: also consider full candle range (high-low) in "strong" condition
         float body = math.abs(close - open)
+        float candle_range = high - low
+        float min_reject_range = atr_now * rejection_atr_mult
         bool green = close > open
         bool red   = close < open
 
@@ -393,20 +403,18 @@ detect_rejections() =>
             if z.zone_type == "Demand"
                 bool touched = low <= z.top
                 bool left_up = close > z.top
-                bool strong  = green and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_up and strong
-                    label.new(bar_index, low, "B", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.tiny)
-                    // TI-18: Alerts when and only when B sign appears (with volume)
-                    alert("B "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+                bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+                if alerts_on_departure and touched and left_up and strong_up
+                    // TI-22: alert only when B is drawn
+                    make_label_and_alert("B", low, z.tf_label)
 
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
-                bool strong  = red and (body >= min_reject_body)
-                if alerts_on_departure and touched and left_dn and strong
-                    label.new(bar_index, high, "S", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.tiny)
-                    // TI-18: Alerts when and only when S sign appears (with volume)
-                    alert("S "+syminfo.ticker+" "+z.tf_label+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-18
+                bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
+                if alerts_on_departure and touched and left_dn and strong_dn
+                    // TI-22: alert only when S is drawn
+                    make_label_and_alert("S", high, z.tf_label)
 
 // === TI-9: exit when reaching opposite zone of the same timeframe label
 manage_exits_same_tf() =>
@@ -440,8 +448,8 @@ main() =>
         detect_mtf_patterns_universal("", "CT", mtf_open_history_ct, mtf_high_history_ct, mtf_low_history_ct, mtf_close_history_ct, mtf_atr_history_ct, mtf_time_history_ct)
 
     update_zones()
-    detect_rejections()     // only draws B/S labels on retests if enabled (alerts tied to labels) // TI-18
-    manage_exits_same_tf()  // exit at opposite zone (same TF)
+    detect_rejections()
+    manage_exits_same_tf()
 
 // === Run main ===
 main()
