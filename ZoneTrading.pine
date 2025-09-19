@@ -1,6 +1,7 @@
 //@version=5
 // TI-9: place trades also *when a new zone is formed* (strong departure candle)
 // TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
+// TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
 // Title unchanged per requirement
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
@@ -34,8 +35,10 @@ range_mult = input.float(2.5, "Zone distance filter (× Daily Range)", step=0.1,
 
 // === TI-7: Rejection candle body threshold input (× ATR) ===
 rejection_atr_mult = input.float(0.5, "Rejection Candle Min Body (× ATR)", minval=0.0, step=0.05, group=group_params)
-// === TI-7: Alert toggle (default OFF) ===
-alerts_on_departure = input.bool(false, "Alert on zone depature", group=group_params)
+
+// === TI-26: Separate toggles
+show_entries  = input.bool(true,  "Show entries",      group=group_params)   // TI-26
+exec_strategy = input.bool(false, "Execute strategy",  group=group_params)   // TI-26
 
 // === TI-9: Stop loss distance as % of zone height (outside the zone)
 sl_zone_pct = input.float(0.30, "Stoploss distance percent of zone size", minval=0.0, step=0.01, group=group_params)
@@ -231,10 +234,10 @@ make_trade_id() =>
 
 // === TI-22: helper that ALWAYS couples label creation with alert; used everywhere B/S labels are drawn
 make_label_and_alert(sig, y, tf_lbl) =>
-    color c = sig == "B" ? color.new(color.green, 0) : color.new(color.red, 0) // TI-22
-    label_style = sig == "B" ? label.style_label_up : label.style_label_down    // TI-22
-    label.new(bar_index, y, sig, color=c, textcolor=color.white, style=label_style, size=size.tiny) // TI-22
-    alert(sig+" "+syminfo.ticker+" "+tf_lbl+" vol="+str.tostring(volume), alert.freq_once_per_bar_close) // TI-22
+    color c = sig == "B" ? color.new(color.green, 0) : color.new(color.red, 0)
+    label_style = sig == "B" ? label.style_label_up : label.style_label_down
+    label.new(bar_index, y, sig, color=c, textcolor=color.white, style=label_style, size=size.tiny)
+    alert(sig+" "+syminfo.ticker+" "+tf_lbl+" vol="+str.tostring(volume), alert.freq_once_per_bar_close)
 
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, close_hist, atr_hist, time_hist) =>
@@ -345,49 +348,47 @@ detect_mtf_patterns_universal(tf, tf_label, open_hist, high_hist, low_hist, clos
                         // ===== TI-9: TAKE POSITION WHEN A NEW ZONE IS FORMED (strong departure candle) =====
                         float zone_h = zone_top - zone_bottom
 
-                        // DEMAND → enter/reverse LONG, draw only "B" label (no other labels)
+                        // DEMAND → enter/reverse LONG, label based on Show entries; orders based on Execute strategy
                         if zone_type == "Demand"
-                            if strategy.position_size < 0
-                                string exit_idS = array.get(pos_entry_id_arr, 0)
-                                strategy.close("SHORT", comment=exit_idS)
-                                clear_position_context()
-                            if strategy.position_size <= 0
-                                string new_id = make_trade_id()
-                                float sl_long = zone_bottom - zone_h * sl_zone_pct
-                                strategy.entry("LONG", strategy.long, comment=new_id)
-                                strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long, comment=new_id)
-                                set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_id)
-                                if alerts_on_departure
-                                    // TI-22: alert only when B is drawn
-                                    make_label_and_alert("B", low, display_tf_label)
+                            if exec_strategy
+                                if strategy.position_size < 0
+                                    string exit_idS = array.get(pos_entry_id_arr, 0)
+                                    strategy.close("SHORT", comment=exit_idS)
+                                    clear_position_context()
+                                if strategy.position_size <= 0
+                                    string new_id = make_trade_id()
+                                    float sl_long = zone_bottom - zone_h * sl_zone_pct
+                                    strategy.entry("LONG", strategy.long, comment=new_id)
+                                    strategy.exit("LONG-SL", from_entry="LONG", stop=sl_long, comment=new_id)
+                                    set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_id)
+                            if show_entries
+                                make_label_and_alert("B", low, display_tf_label)
 
-                        // SUPPLY → enter/reverse SHORT, draw only "S" label (no other labels)
+                        // SUPPLY → enter/reverse SHORT, label based on Show entries; orders based on Execute strategy
                         if zone_type == "Supply"
-                            if strategy.position_size > 0
-                                string exit_idL = array.get(pos_entry_id_arr, 0)
-                                strategy.close("LONG", comment=exit_idL)
-                                clear_position_context()
-                            if strategy.position_size >= 0
-                                string new_idS = make_trade_id()
-                                float sl_short = zone_top + zone_h * sl_zone_pct
-                                strategy.entry("SHORT", strategy.short, comment=new_idS)
-                                strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short, comment=new_idS)
-                                set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_idS)
-                                if alerts_on_departure
-                                    // TI-22: alert only when S is drawn
-                                    make_label_and_alert("S", high, display_tf_label)
+                            if exec_strategy
+                                if strategy.position_size > 0
+                                    string exit_idL = array.get(pos_entry_id_arr, 0)
+                                    strategy.close("LONG", comment=exit_idL)
+                                    clear_position_context()
+                                if strategy.position_size >= 0
+                                    string new_idS = make_trade_id()
+                                    float sl_short = zone_top + zone_h * sl_zone_pct
+                                    strategy.entry("SHORT", strategy.short, comment=new_idS)
+                                    strategy.exit("SHORT-SL", from_entry="SHORT", stop=sl_short, comment=new_idS)
+                                    set_position_context(display_tf_label, zone_type, zone_top, zone_bottom, new_idS)
+                            if show_entries
+                                make_label_and_alert("S", high, display_tf_label)
 
 // === TI-7: Rejection detection helpers and function ===
 within_zone(val, top, bottom) =>
     val <= top and val >= bottom
 
 // (kept; still can generate B/S on retests; alerts tied strictly to label creation)
-// TI-22: Alerts only on B and S — emit alert ONLY alongside the label
 detect_rejections() =>
     if array.size(active_zones) > 0
         float atr_now = ta.atr(atr_length)
         float min_reject_body = atr_now * rejection_atr_mult
-        // TI-20: also consider full candle range (high-low) in "strong" condition
         float body = math.abs(close - open)
         float candle_range = high - low
         float min_reject_range = atr_now * rejection_atr_mult
@@ -404,16 +405,14 @@ detect_rejections() =>
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if alerts_on_departure and touched and left_up and strong_up
-                    // TI-22: alert only when B is drawn
+                if show_entries and touched and left_up and strong_up
                     make_label_and_alert("B", low, z.tf_label)
 
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if alerts_on_departure and touched and left_dn and strong_dn
-                    // TI-22: alert only when S is drawn
+                if show_entries and touched and left_dn and strong_dn
                     make_label_and_alert("S", high, z.tf_label)
 
 // === TI-9: exit when reaching opposite zone of the same timeframe label
@@ -425,12 +424,10 @@ manage_exits_same_tf() =>
             for i = 0 to array.size(active_zones) - 1
                 ZoneData z = array.get(active_zones, i)
                 if z.tf_label == ctx_tf
-                    // Long: exit at Supply zone of same TF
                     if strategy.position_size > 0 and z.zone_type == "Supply" and high >= z.bottom
                         strategy.close("LONG", comment=ctx_id)
                         clear_position_context()
                         break
-                    // Short: exit at Demand zone of same TF
                     if strategy.position_size < 0 and z.zone_type == "Demand" and low <= z.top
                         strategy.close("SHORT", comment=ctx_id)
                         clear_position_context()
@@ -449,7 +446,8 @@ main() =>
 
     update_zones()
     detect_rejections()
-    manage_exits_same_tf()
+    if exec_strategy
+        manage_exits_same_tf()
 
 // === Run main ===
 main()
