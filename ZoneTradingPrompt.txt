@@ -806,16 +806,20 @@ It should contain 4 sections horizontally placed, displaying trends for:
 - M60 
 - H4
 - D1
+- W
 Calculate the trend simply as the color of the last candle of the corresponding timeframe
 The section should be a square containing the timeframe e.g. H1, M5  
 and should have the color of the trend green for uptrend, red for downtrend
+
+
 uptrend means the last candle is green on the corresponding timeframe
 downtrend means the last candle is red on the corresponding timeframe
 Last candle means the latest candle - unfinished (currently in progress)
-Place the indicator bottom left 
+
+Place the indicator bottom RIGHT  make the squares 
 
 
-If you need necessary arrays to the code - do it but reuse what is already there , the arrays for M1, M5, M15, M60
+If you need necessary arrays to the code - do it but reuse what is already there , the arrays for M1, M5, M15, M60, W
 
 
 Mark the changes with user story ID in the comment above
@@ -834,3 +838,49 @@ Dont modify global vriables inside a function
 
 TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
+
+
+=================================
+//TI-33 MTF Trend indicator
+
+update the script
+
+Add a trend indicator.  See the screenshot how it should look like
+It should contain 4 sections horizontally placed, displaying trends for:
+-current timeframe
+- M60 
+- H4
+- D1
+- W
+Calculate the trend simply as the color of the last candle of the corresponding timeframe
+The section should be a square containing the timeframe e.g. H1, M5  
+
+For current timeframe Calculte the trend based on the EMA20/50 (setting) on the corresponding timeframe 
+
+FOr other timerframes: 
+uptrend means the last candle is green on the corresponding timeframe
+downtrend means the last candle is red on the corresponding timeframe
+Last candle means the latest candle - unfinished (currently in progress)
+
+
+Place the indicator bottom RIGHT
+
+
+If you need necessary arrays to the code - do it but reuse what is already there , the arrays for M1, M5, M15, M60, W
+
+
+Mark the changes with user story ID in the comment above
+NEVER change the name of the script!!!
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
