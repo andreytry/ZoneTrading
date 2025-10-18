@@ -900,11 +900,19 @@ Stoploss - no change!!!
 Make STRTEGY LABELS shorter - like   "YYMMDD.ZZZ" - this is the format to implement
  - zzzz - order No.   
 The position close must have the SAME LABEL as POSITION OPEN
+
 Visualize the positions inluding takeprofit and stoploss in the standard position graphics THIS IS IMPORTANT!!! 
 Red rectangle for stoploss, green - for takeprofit - standard position banner graphics
 The position visualization must look like this see screenshot, include entyr price, 
 dark red transparent rectangle from entry to stop loss, dark green transparent rectangle from entry to take profit!  
-The width of the position should be from the entry candle to the current candle!
+The width of the position should be from the entry candle to the candle NEXT TO THE CURRENT! 
+So the width of the position rectangle is MINMUM ONE FULL CANDLE
+
+
+The visualization is ON when  the "Show entries" toggle is ON.
+The "Execute strategy" toggle works independently and is unrelated to the position visualization
+
+
 
 
 
@@ -922,6 +930,7 @@ Dont make newline between function arguments
 Dont modify global vriables inside a function
 
 
+ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
 TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
 
@@ -932,7 +941,10 @@ TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 update the script
 
 Implement additional condition - enter when there is B or S AND the entry candle opens in the proximity of a EMA 50 or EMA100 or EMA200
-The Candle should be n the direction of of the trend meaning H1 and H4 must be green for a long position or RED for a short position.
+Inroduce a setting "EMA proximity" which is measured in ATR, e.g. 0.5 ATR
+The B/S should be aligned with the trend, meaning: 
+    to enter LONG with B the H1 and H4 must be green 
+    to enter SHORT with S the H1 and H4 must be RED.
  
 
 
