@@ -1,5 +1,5 @@
 //@version=5
-// TI-40: Replace TP1 & Minimum Entry R with Target RR (default 1.5R). Target RR is a visualization/milestone only; do NOT close there — keep holding until opposite signal. Visualize positions only when (1) Execute strategy is ON and (2) Visualize Positions is ON. B/S and entry are connected (enter unless already in same direction). Same label on close as on open.
+// TI-40: Target RR (default 1.5R) is a milestone; DO NOT close at target. Hold until opposite signal ONLY AFTER Target RR has been reached since entry. Visualization (entry→TP green, entry→SL red) spans entry candle to current candle; gated by Execute strategy & Visualize Positions.
 // TI-9: place trades also *when a new zone is formed* (strong departure candle)
 // TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
 // TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
@@ -258,7 +258,10 @@ var pos_zone_type_arr   = array.new_string()
 var pos_zone_top_arr    = array.new_float()
 var pos_zone_bottom_arr = array.new_float()
 var pos_entry_id_arr    = array.new_string()
-var pos_entry_px_arr    = array.new_float()             // TI-40: store intended entry price to draw on entry bar
+var pos_entry_px_arr    = array.new_float()
+var pos_entry_time_arr  = array.new_int()
+var pos_entry_bar_arr   = array.new_int()
+var pos_target_reached_arr = array.new_bool()      // TI-40: has price touched Target RR since entry?
 if barstate.isfirst
     array.push(pos_tf_label_arr,"")
     array.push(pos_zone_type_arr,"")
@@ -266,6 +269,9 @@ if barstate.isfirst
     array.push(pos_zone_bottom_arr,na)
     array.push(pos_entry_id_arr,"")
     array.push(pos_entry_px_arr,na)
+    array.push(pos_entry_time_arr,na)
+    array.push(pos_entry_bar_arr,na)
+    array.push(pos_target_reached_arr,false)
 
 set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_tf_label_arr,0,tf_lbl)
@@ -273,7 +279,10 @@ set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_zone_top_arr,0,z_top)
     array.set(pos_zone_bottom_arr,0,z_bottom)
     array.set(pos_entry_id_arr,0,entry_id)
-    array.set(pos_entry_px_arr,0,close)                 // store intended entry now (entry bar)
+    array.set(pos_entry_px_arr,0,close)
+    array.set(pos_entry_time_arr,0,time)
+    array.set(pos_entry_bar_arr,0,bar_index)
+    array.set(pos_target_reached_arr,0,false)
 
 clear_position_context() =>
     array.set(pos_tf_label_arr,0,"")
@@ -282,13 +291,20 @@ clear_position_context() =>
     array.set(pos_zone_bottom_arr,0,na)
     array.set(pos_entry_id_arr,0,"")
     array.set(pos_entry_px_arr,0,na)
+    array.set(pos_entry_time_arr,0,na)
+    array.set(pos_entry_bar_arr,0,na)
+    array.set(pos_target_reached_arr,0,false)
 
-// === TP/SL visuals (rectangles)
-var tp_box_arr = array.new_box()
-var sl_box_arr = array.new_box()
+// === VISUALS: rectangles & entry line/label (unchanged behavior, as requested) ===
+var tp_box_arr    = array.new_box()
+var sl_box_arr    = array.new_box()
+var entry_line_ar = array.new_line()
+var entry_lbl_arr = array.new_label()
 if barstate.isfirst
     array.push(tp_box_arr,na)
     array.push(sl_box_arr,na)
+    array.push(entry_line_ar,na)
+    array.push(entry_lbl_arr,na)
 
 delete_pos_boxes() =>
     box tb = array.get(tp_box_arr,0)
@@ -299,30 +315,88 @@ delete_pos_boxes() =>
     if not na(sb)
         box.delete(sb)
         array.set(sl_box_arr,0,na)
+    line ln = array.get(entry_line_ar,0)
+    if not na(ln)
+        line.delete(ln)
+        array.set(entry_line_ar,0,na)
+    label lb = array.get(entry_lbl_arr,0)
+    if not na(lb)
+        label.delete(lb)
+        array.set(entry_lbl_arr,0,na)
 
-draw_or_update_box(is_tp,price,color_box) =>
-    float pad = math.max(atr_ct * 0.02, syminfo.mintick * 2.0)
-    float y1 = price + pad
-    float y2 = price - pad
+draw_or_update_box(is_tp,left_t,right_t,top,bottom,color_box,alpha_tp,alpha_sl) =>
     if is_tp
         box bx_tp = array.get(tp_box_arr,0)
         if na(bx_tp)
-            bx_tp := box.new(time,y1,time,y2,xloc=xloc.bar_time,extend=extend.right,bgcolor=color.new(color_box,0),border_color=color_box)
+            bx_tp := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,60),border_color=color.new(color_box,0))
             array.set(tp_box_arr,0,bx_tp)
         else
-            box.set_right(bx_tp,time)
-            box.set_top(bx_tp,y1)
-            box.set_bottom(bx_tp,y2)
+            box.set_left(bx_tp,left_t)
+            box.set_right(bx_tp,right_t)
+            box.set_top(bx_tp,top)
+            box.set_bottom(bx_tp,bottom)
     else
         box bx_sl = array.get(sl_box_arr,0)
         if na(bx_sl)
-            bx_sl := box.new(time,y1,time,y2,xloc=xloc.bar_time,extend=extend.right,bgcolor=color.new(color_box,0),border_color=color_box)
+            bx_sl := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,70),border_color=color.new(color_box,0))
             array.set(sl_box_arr,0,bx_sl)
         else
-            box.set_right(bx_sl,time)
-            box.set_top(bx_sl,y1)
-            box.set_bottom(bx_sl,y2)
+            box.set_left(bx_sl,left_t)
+            box.set_right(bx_sl,right_t)
+            box.set_top(bx_sl,top)
+            box.set_bottom(bx_sl,bottom)
 
+draw_or_update_entry_line(left_t,right_t,price) =>
+    line ln = array.get(entry_line_ar,0)
+    if na(ln)
+        ln := line.new(left_t,price,right_t,price,xloc=xloc.bar_time,extend=extend.none,color=color.new(color.white,0),width=1)
+        array.set(entry_line_ar,0,ln)
+    else
+        line.set_x1(ln,left_t)
+        line.set_x2(ln,right_t)
+        line.set_y1(ln,price)
+        line.set_y2(ln,price)
+    label lb = array.get(entry_lbl_arr,0)
+    string txt = "Entry: "+str.tostring(price,format.mintick)
+    if na(lb)
+        lb := label.new(right_t,price,txt,xloc=xloc.bar_time,style=label.style_label_left,textcolor=color.white,color=color.new(color.gray,70),size=size.tiny)
+        array.set(entry_lbl_arr,0,lb)
+    else
+        label.set_x(lb,right_t)
+        label.set_y(lb,price)
+        label.set_text(lb,txt)
+
+// === RR milestone tracker: has price touched Target RR since entry? ===
+update_rr_progress() =>
+    if strategy.position_size != 0 or array.get(pos_entry_id_arr,0) != ""
+        string zt = array.get(pos_zone_type_arr,0)
+        float z_top = array.get(pos_zone_top_arr,0)
+        float z_bot = array.get(pos_zone_bottom_arr,0)
+        float entry_px_ctx = array.get(pos_entry_px_arr,0)
+        float entry_px_live = strategy.position_size != 0 ? strategy.position_avg_price : na
+        float entry_px = na(entry_px_live) ? entry_px_ctx : entry_px_live
+        int entry_bar = array.get(pos_entry_bar_arr,0)
+        if not na(entry_px) and not na(z_top) and not na(z_bot) and not na(entry_bar)
+            int bars = math.max(bar_index - entry_bar + 1,1)
+            float zone_h = z_top - z_bot
+            if zt == "Demand"
+                float sl_long = z_bot - zone_h * sl_zone_pct
+                float risk = entry_px - sl_long
+                if risk > 0
+                    float tp = entry_px + target_rr * risk
+                    float hi = ta.highest(high,bars)
+                    if hi >= tp
+                        array.set(pos_target_reached_arr,0,true)
+            if zt == "Supply"
+                float sl_short = z_top + zone_h * sl_zone_pct
+                float risk = sl_short - entry_px
+                if risk > 0
+                    float tpS = entry_px - target_rr * risk
+                    float lo = ta.lowest(low,bars)
+                    if lo <= tpS
+                        array.set(pos_target_reached_arr,0,true)
+
+// === Final compositor visuals ===
 update_position_visuals() =>
     bool can_draw = exec_strategy and visualize_positions and (strategy.position_size != 0 or (array.get(pos_entry_id_arr,0) != ""))
     if can_draw
@@ -332,22 +406,30 @@ update_position_visuals() =>
         float entry_px_ctx = array.get(pos_entry_px_arr,0)
         float entry_px_live = strategy.position_size != 0 ? strategy.position_avg_price : na
         float entry_px = na(entry_px_live) ? entry_px_ctx : entry_px_live
-        if true
+        int left_t = array.get(pos_entry_time_arr,0)
+        int right_t = time
+        if not na(z_top) and not na(z_bot) and not na(entry_px) and not na(left_t)
             float zone_h = z_top - z_bot
             if ctx_type == "Demand"
                 float sl_long = z_bot - zone_h * sl_zone_pct
                 float risk = entry_px - sl_long
                 if risk > 0
                     float tp_target = entry_px + target_rr * risk
-                    draw_or_update_box(true,tp_target,color.new(color.green,70))
-                    draw_or_update_box(false,sl_long,color.new(color.red,70))
+                    float g_top = math.max(entry_px,tp_target), g_bot = math.min(entry_px,tp_target)
+                    draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70)
+                    float r_top = math.max(entry_px,sl_long), r_bot = math.min(entry_px,sl_long)
+                    draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)
+                    draw_or_update_entry_line(left_t,right_t,entry_px)
             if ctx_type == "Supply"
                 float sl_short = z_top + zone_h * sl_zone_pct
                 float risk = sl_short - entry_px
                 if risk > 0
                     float tp_target_s = entry_px - target_rr * risk
-                    draw_or_update_box(true,tp_target_s,color.new(color.green,70))
-                    draw_or_update_box(false,sl_short,color.new(color.red,70))
+                    float g_top_s = math.max(entry_px,tp_target_s), g_bot_s = math.min(entry_px,tp_target_s)
+                    draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
+                    float r_top_s = math.max(entry_px,sl_short), r_bot_s = math.min(entry_px,sl_short)
+                    draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
+                    draw_or_update_entry_line(left_t,right_t,entry_px)
     else
         delete_pos_boxes()
 
@@ -366,7 +448,8 @@ make_trade_id() =>
     int yy = year % 100
     zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero3(next_order_no())
 
-// === Unified label+alert+entry handler (B/S -> entry unless already same direction)
+// === Unified label+alert+entry handler (B/S -> enter unless already same direction)
+// === IMPORTANT CHANGE: Do NOT close opposite unless Target RR has been reached since entry
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
     if show_entries
         color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
@@ -376,41 +459,53 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
     if exec_strategy
         float zone_h = zone_top - zone_bottom
         if sig == "B"
-            bool same_dir = strategy.position_size > 0
-            if not same_dir
-                if strategy.position_size < 0
+            bool holding_long = strategy.position_size > 0
+            bool holding_short = strategy.position_size < 0
+            if holding_short
+                bool rr_ok = array.get(pos_target_reached_arr,0)
+                if rr_ok
                     string exit_idS = array.get(pos_entry_id_arr,0)
                     if exit_idS != ""
                         strategy.close("SHORT",comment=exit_idS)
                         clear_position_context()
                         delete_pos_boxes()
+                else
+                    // Ignore flip until RR reached
+                    na
+            if not holding_long and (not holding_short or array.get(pos_target_reached_arr,0))
                 float sl_long = zone_bottom - zone_h * sl_zone_pct
                 string new_id = make_trade_id()
                 strategy.entry("LONG",strategy.long,comment=new_id)
                 strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
                 set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
         if sig == "S"
-            bool same_dirS = strategy.position_size < 0
-            if not same_dirS
-                if strategy.position_size > 0
+            bool holding_short2 = strategy.position_size < 0
+            bool holding_long2 = strategy.position_size > 0
+            if holding_long2
+                bool rr_ok2 = array.get(pos_target_reached_arr,0)
+                if rr_ok2
                     string exit_idL = array.get(pos_entry_id_arr,0)
                     if exit_idL != ""
                         strategy.close("LONG",comment=exit_idL)
                         clear_position_context()
                         delete_pos_boxes()
+                else
+                    na
+            if not holding_short2 and (not holding_long2 or array.get(pos_target_reached_arr,0))
                 float sl_short = zone_top + zone_h * sl_zone_pct
                 string new_idS = make_trade_id()
                 strategy.entry("SHORT",strategy.short,comment=new_idS)
                 strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
                 set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
 
-// === Close on opposite signal (same TF) using same label as open
+// === Close on opposite signal (same TF) ONLY if Target RR has been reached since entry
 maybe_close_on_signal(sig,tf_lbl) =>
     if exec_strategy and strategy.position_size != 0
         string ctx_tf = array.get(pos_tf_label_arr,0)
         string ctx_type = array.get(pos_zone_type_arr,0)
         string ctx_id = array.get(pos_entry_id_arr,0)
-        if ctx_tf != "" and ctx_id != "" and tf_lbl == ctx_tf
+        bool rr_ok = array.get(pos_target_reached_arr,0)
+        if rr_ok and ctx_tf != "" and ctx_id != "" and tf_lbl == ctx_tf
             if (ctx_type == "Demand" and sig == "S") or (ctx_type == "Supply" and sig == "B")
                 if strategy.position_size > 0
                     strategy.close("LONG",comment=ctx_id)
@@ -448,13 +543,13 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                     int  leg_in_index = -1
                     while idx <= max_small_candles and idx < array.size(open_hist)
                         float s_open  = safe_get_float(open_hist,idx,"open_hist@loop")
-                        float s_close = safe_get_float(close_hist,idx,"close_hist@loop")
+                        float s_close = safe_get_float(close_hist,idx,"open_hist@loop")
                         if na(s_open) or na(s_close)
                             break
                         float s_body  = body_size_mtf(s_open,s_close)
                         if small_count >= 1
                             float leg_open  = safe_get_float(open_hist,idx,"open_hist@legchk")
-                            float leg_close = safe_get_float(close_hist,idx,"close_hist@legchk")
+                            float leg_close = safe_get_float(close_hist,idx,"open_hist@legchk")
                             if na(leg_open) or na(leg_close)
                                 break
                             float leg_body  = body_size_mtf(leg_open,leg_close)
@@ -463,7 +558,7 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                                 leg_in_index  := idx
                                 break
                         float s_high  = safe_get_float(high_hist,idx,"high_hist@loop")
-                        float s_low   = safe_get_float(low_hist,idx,"low_hist@loop")
+                        float s_low   = safe_get_float(low_hist,idx,"high_hist@loop")
                         if na(s_high) or na(s_low)
                             break
                         float up_w = s_high - math.max(s_open,s_close)
@@ -551,7 +646,7 @@ detect_rejections() =>
                     handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("S",z.tf_label)
 
-// === Legacy exit manager disabled by TI-40 (hold until opposite signal)
+// === Legacy exit manager (not used for TP; SL managed by strategy.exit)
 manage_exits_same_tf() =>
     0
 
@@ -588,6 +683,7 @@ main() =>
     detect_rejections()
     if exec_strategy
         manage_exits_same_tf()
+    update_rr_progress()           // TI-40: update RR milestone each bar
     update_position_visuals()
     update_trend_table()
 
