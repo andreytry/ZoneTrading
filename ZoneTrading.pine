@@ -4,6 +4,7 @@
 // TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
 // TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
 // TI-33: MTF Trend indicator — squares CT/H1/H4/D1/W at bottom-right using EMA20/50 for CT, candle color for others
+// TI-43: Limit position by ATR — add Max Position Risk (× ATR) gate; only enter if |entry-stop| <= ATR × multiplier
 
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
@@ -52,6 +53,9 @@ ema_slow_len = input.int(50,"Trend EMA Slow (CT)",minval=1,group=group_params)
 
 // === TI-9: Stop loss distance as % of zone height (outside the zone)
 sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0.0,step=0.01,group=group_params)
+
+// [US-TI-43] Max risk gate: if |entry-stop| exceeds ATR × multiplier, skip the entry
+max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
@@ -186,7 +190,7 @@ find_zone_boundaries_universal(start_idx,num_small_candles,zone_type,open_hist,h
             if start_idx + i < array.size(open_hist)
                 float hi = safe_get_float(high_hist,start_idx+i,"high_hist@loop")
                 float oi = safe_get_float(open_hist,start_idx+i,"open_hist@loop")
-                float ci = safe_get_float(close_hist,start_idx+i,"close_hist@loop")
+                float ci = safe_get_float(close_hist,start_idx+i,"open_hist@loop")
                 if not na(hi) and not na(oi) and not na(ci)
                     zone_top := math.max(zone_top,hi)
                     zone_bottom := math.min(zone_bottom,math.min(oi,ci))
@@ -484,22 +488,26 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
             else if is_short_pos()
                 bool gate_ok = array.get(pos_hitTarget_arr,0) or array.get(pos_hitSL_arr,0)
                 allow_long := gate_ok
+            // [US-TI-43] Gate the actual entry by max ATR-based risk (compute SL and risk first; only proceed if risk <= ATR×mult)
             if allow_long
                 float zone_h = zone_top - zone_bottom
                 float sl_long = zone_bottom - zone_h * sl_zone_pct
-                if exec_strategy and is_short_pos()
-                    string exit_idS = array.get(pos_entry_id_arr,0)
-                    if exit_idS != ""
-                        strategy.close("SHORT",comment=exit_idS)
-                clear_position_context()
-                delete_pos_boxes()
-                string new_id = make_trade_id()
-                set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
-                array.set(pos_side_arr,0,"LONG")
-                array.set(pos_stop_px_arr,0,sl_long)
-                if exec_strategy
-                    strategy.entry("LONG",strategy.long,comment=new_id)
-                    strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
+                float risk_long = math.abs(close - sl_long)
+                bool risk_ok_long = risk_long <= atr_ct * max_position_atr_mult
+                if risk_ok_long
+                    if exec_strategy and is_short_pos()
+                        string exit_idS = array.get(pos_entry_id_arr,0)
+                        if exit_idS != ""
+                            strategy.close("SHORT",comment=exit_idS)
+                    clear_position_context()
+                    delete_pos_boxes()
+                    string new_id = make_trade_id()
+                    set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
+                    array.set(pos_side_arr,0,"LONG")
+                    array.set(pos_stop_px_arr,0,sl_long)
+                    if exec_strategy
+                        strategy.entry("LONG",strategy.long,comment=new_id)
+                        strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
 
     if sig == "S"
         bool already_short = is_short_pos()
@@ -510,22 +518,26 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
             else if is_long_pos()
                 bool gate_ok = array.get(pos_hitTarget_arr,0) or array.get(pos_hitSL_arr,0)
                 allow_short := gate_ok
+            // [US-TI-43] Gate the actual entry by max ATR-based risk (compute SL and risk first; only proceed if risk <= ATR×mult)
             if allow_short
                 float zone_h = zone_top - zone_bottom
                 float sl_short = zone_top + zone_h * sl_zone_pct
-                if exec_strategy and is_long_pos()
-                    string exit_idL = array.get(pos_entry_id_arr,0)
-                    if exit_idL != ""
-                        strategy.close("LONG",comment=exit_idL)
-                clear_position_context()
-                delete_pos_boxes()
-                string new_idS = make_trade_id()
-                set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
-                array.set(pos_side_arr,0,"SHORT")
-                array.set(pos_stop_px_arr,0,sl_short)
-                if exec_strategy
-                    strategy.entry("SHORT",strategy.short,comment=new_idS)
-                    strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
+                float risk_short = math.abs(close - sl_short)
+                bool risk_ok_short = risk_short <= atr_ct * max_position_atr_mult
+                if risk_ok_short
+                    if exec_strategy and is_long_pos()
+                        string exit_idL = array.get(pos_entry_id_arr,0)
+                        if exit_idL != ""
+                            strategy.close("LONG",comment=exit_idL)
+                    clear_position_context()
+                    delete_pos_boxes()
+                    string new_idS = make_trade_id()
+                    set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
+                    array.set(pos_side_arr,0,"SHORT")
+                    array.set(pos_stop_px_arr,0,sl_short)
+                    if exec_strategy
+                        strategy.entry("SHORT",strategy.short,comment=new_idS)
+                        strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
 
 // === Close on opposite signal (same TF) using same label as open
 // Only after Target RR milestone; always update virtual state; send real close only if exec_strategy ON.
@@ -580,7 +592,7 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                 int leg_in_index = -1
                 while idx <= max_small_candles and idx < array.size(open_hist)
                     float s_open = safe_get_float(open_hist,idx,"open_hist@loop")
-                    float s_close = safe_get_float(close_hist,idx,"close_hist@loop")
+                    float s_close = safe_get_float(close_hist,idx,"open_hist@loop")
                     if na(s_open) or na(s_close)
                         break
                     float s_body = body_size_mtf(s_open,s_close)
