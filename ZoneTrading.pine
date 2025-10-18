@@ -1,9 +1,9 @@
 //@version=5
+// TI-40: Replace TP1 & Minimum Entry R with Target RR (default 1.5R). Target RR is a visualization/milestone only; do NOT close there — keep holding until opposite signal. Visualize positions only when (1) Execute strategy is ON and (2) Visualize Positions is ON. B/S and entry are connected (enter unless already in same direction). Same label on close as on open. 
 // TI-9: place trades also *when a new zone is formed* (strong departure candle)
 // TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
 // TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
 // TI-33: MTF Trend indicator — squares CT/H1/H4/D1/W at bottom-right using EMA20/50 for CT, candle color for others
-// Title unchanged per requirement
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
 // === Constants ===
@@ -41,6 +41,11 @@ rejection_atr_mult = input.float(0.5,"Rejection Candle Min Body (× ATR)",minval
 // === TI-26: Separate toggles
 show_entries  = input.bool(true,"Show entries",group=group_params)   // TI-26
 exec_strategy = input.bool(false,"Execute strategy",group=group_params)   // TI-26
+
+// === TI-40: Visualization controls ===
+group_vis = "Visualization"
+visualize_positions = input.bool(true,"Visualize Positions",group=group_vis)
+target_rr = input.float(1.5,"Target RR (R)",minval=0.1,step=0.1,group=group_vis)
 
 // === TI-33: Trend EMA settings (CT uses these) ===
 ema_fast_len = input.int(20,"Trend EMA Fast (CT)",minval=1,group=group_params) // TI-33
@@ -105,7 +110,10 @@ var array<int>   mtf_time_history_ct  = array.new<int>()
 [dHighD,dLowD] = request.security(syminfo.tickerid,"D",[high,low],lookahead=barmerge.lookahead_off)
 daily_range = dHighD - dLowD
 
-// Helper: current-range check (keeps same logic you had)
+// === Global ATR series (consistency) ===
+atr_ct = ta.atr(atr_length)
+
+// Helper: current-range check
 is_zone_in_range(_top,_bottom) =>
     float mid = (_top + _bottom) * 0.5
     float denom = math.max(daily_range,syminfo.mintick)
@@ -150,17 +158,10 @@ idx_in_bounds_zone(arr,idx,where) =>
         diag_oob(where,idx,sz)
     ok
 
-safe_get_float(arr,idx,where) =>
-    idx_in_bounds_float(arr,idx,where) ? array.get(arr,idx) : na
-
-safe_get_int(arr,idx,where) =>
-    idx_in_bounds_int(arr,idx,where) ? array.get(arr,idx) : na
-
-safe_get_str(arr,idx,where) =>
-    idx_in_bounds_str(arr,idx,where) ? array.get(arr,idx) : ""
-
-safe_get_zone(arr,idx,where) =>
-    idx_in_bounds_zone(arr,idx,where) ? array.get(arr,idx) : na
+safe_get_float(arr,idx,where) => idx_in_bounds_float(arr,idx,where) ? array.get(arr,idx) : na
+safe_get_int(arr,idx,where) => idx_in_bounds_int(arr,idx,where) ? array.get(arr,idx) : na
+safe_get_str(arr,idx,where) => idx_in_bounds_str(arr,idx,where) ? array.get(arr,idx) : ""
+safe_get_zone(arr,idx,where) => idx_in_bounds_zone(arr,idx,where) ? array.get(arr,idx) : na
 
 // === Universal boundaries function with array parameters ===
 find_zone_boundaries_universal(start_idx,num_small_candles,zone_type,open_hist,high_hist,low_hist,close_hist) =>
@@ -199,8 +200,7 @@ find_zone_boundaries_universal(start_idx,num_small_candles,zone_type,open_hist,h
     [zone_top,zone_bottom]
 
 // === TI-2: Overlap detection helper (same timeframe) ===
-ti2_overlap(z1,z2) =>
-    not (z1.bottom > z2.top or z2.bottom > z1.top)
+ti2_overlap(z1,z2) => not (z1.bottom > z2.top or z2.bottom > z1.top)
 
 // === Extend / cull + RANGE TOGGLING ===
 update_zones() =>
@@ -260,18 +260,23 @@ ti2_cull_overlaps_same_tf() =>
                 j += 1
         i += 1
 
-// === TI-9: position context & entry IDs (arrays for safe mutation inside functions)
+// === Position context (arrays for safe mutation inside functions)
 var pos_tf_label_arr    = array.new_string()
 var pos_zone_type_arr   = array.new_string()
 var pos_zone_top_arr    = array.new_float()
 var pos_zone_bottom_arr = array.new_float()
 var pos_entry_id_arr    = array.new_string()
+// TI-40 VISUALS: store intended entry price & entry time for same-bar visuals and width entry->now
+var pos_entry_px_arr    = array.new_float()
+var pos_entry_time_arr  = array.new_int()
 if barstate.isfirst
     array.push(pos_tf_label_arr,"")
     array.push(pos_zone_type_arr,"")
     array.push(pos_zone_top_arr,na)
     array.push(pos_zone_bottom_arr,na)
     array.push(pos_entry_id_arr,"")
+    array.push(pos_entry_px_arr,na)
+    array.push(pos_entry_time_arr,na)
 
 set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_tf_label_arr,0,tf_lbl)
@@ -279,6 +284,8 @@ set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_zone_top_arr,0,z_top)
     array.set(pos_zone_bottom_arr,0,z_bottom)
     array.set(pos_entry_id_arr,0,entry_id)
+    array.set(pos_entry_px_arr,0,close)     // intended entry now
+    array.set(pos_entry_time_arr,0,time)    // entry bar time
 
 clear_position_context() =>
     array.set(pos_tf_label_arr,0,"")
@@ -286,26 +293,194 @@ clear_position_context() =>
     array.set(pos_zone_top_arr,0,na)
     array.set(pos_zone_bottom_arr,0,na)
     array.set(pos_entry_id_arr,0,"")
+    array.set(pos_entry_px_arr,0,na)
+    array.set(pos_entry_time_arr,0,na)
 
-// === TI-9: build entry/exit ID "YYYYMMDDHHMISS.SSS"
+// === TI-40 VISUALS (ONLY CHANGE REQUESTED) ===================================
+// Rectangles + entry line/label that look like the screenshot
+var tp_box_arr    = array.new_box()
+var sl_box_arr    = array.new_box()
+var entry_line_ar = array.new_line()
+var entry_lbl_arr = array.new_label()
+if barstate.isfirst
+    array.push(tp_box_arr,na)
+    array.push(sl_box_arr,na)
+    array.push(entry_line_ar,na)
+    array.push(entry_lbl_arr,na)
+
+delete_pos_boxes() =>
+    box tb = array.get(tp_box_arr,0)
+    if not na(tb)
+        box.delete(tb)
+        array.set(tp_box_arr,0,na)
+    box sb = array.get(sl_box_arr,0)
+    if not na(sb)
+        box.delete(sb)
+        array.set(sl_box_arr,0,na)
+    line ln = array.get(entry_line_ar,0)
+    if not na(ln)
+        line.delete(ln)
+        array.set(entry_line_ar,0,na)
+    label lb = array.get(entry_lbl_arr,0)
+    if not na(lb)
+        label.delete(lb)
+        array.set(entry_lbl_arr,0,na)
+
+// Generic rectangle updater spanning left->right and y-bounds
+draw_or_update_box(is_tp,left_t,right_t,top,bottom,color_box,alpha_tp,alpha_sl) =>
+    if is_tp
+        box bx_tp = array.get(tp_box_arr,0)
+        if na(bx_tp)
+            bx_tp := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,alpha_tp),border_color=color.new(color_box,0))
+            array.set(tp_box_arr,0,bx_tp)
+        else
+            box.set_left(bx_tp,left_t)
+            box.set_right(bx_tp,right_t)
+            box.set_top(bx_tp,top)
+            box.set_bottom(bx_tp,bottom)
+    else
+        box bx_sl = array.get(sl_box_arr,0)
+        if na(bx_sl)
+            bx_sl := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,alpha_sl),border_color=color.new(color_box,0))
+            array.set(sl_box_arr,0,bx_sl)
+        else
+            box.set_left(bx_sl,left_t)
+            box.set_right(bx_sl,right_t)
+            box.set_top(bx_sl,top)
+            box.set_bottom(bx_sl,bottom)
+
+// Entry price thin line + label at right edge
+draw_or_update_entry_line(left_t,right_t,price) =>
+    line ln = array.get(entry_line_ar,0)
+    if na(ln)
+        ln := line.new(left_t,price,right_t,price,xloc=xloc.bar_time,extend=extend.none,color=color.new(color.white,0),width=1)
+        array.set(entry_line_ar,0,ln)
+    else
+        line.set_x1(ln,left_t)
+        line.set_x2(ln,right_t)
+        line.set_y1(ln,price)
+        line.set_y2(ln,price)
+    label lb = array.get(entry_lbl_arr,0)
+    string txt = "Entry: "+str.tostring(price,format.mintick)
+    if na(lb)
+        lb := label.new(right_t,price,txt,xloc=xloc.bar_time,style=label.style_label_left,textcolor=color.white,color=color.new(color.gray,70),size=size.tiny)
+        array.set(entry_lbl_arr,0,lb)
+    else
+        label.set_x(lb,right_t)
+        label.set_y(lb,price)
+        label.set_text(lb,txt)
+
+// FINAL compositor: draws dark green (entry→TargetRR) & dark red (entry→SL) from entry candle to current candle
+update_position_visuals() =>
+    bool can_draw = exec_strategy and visualize_positions and (strategy.position_size != 0 or (array.get(pos_entry_id_arr,0) != ""))
+    if can_draw
+        string ctx_type = array.get(pos_zone_type_arr,0)
+        float z_top = array.get(pos_zone_top_arr,0)
+        float z_bot = array.get(pos_zone_bottom_arr,0)
+        float entry_px_ctx = array.get(pos_entry_px_arr,0)
+        float entry_px_live = strategy.position_size != 0 ? strategy.position_avg_price : na
+        float entry_px = na(entry_px_live) ? entry_px_ctx : entry_px_live
+        int left_t = array.get(pos_entry_time_arr,0)
+        int right_t = time
+        if not na(z_top) and not na(z_bot) and not na(entry_px) and not na(left_t)
+            float zone_h = z_top - z_bot
+            // LONG visuals
+            if ctx_type == "Demand"
+                float sl_long = z_bot - zone_h * sl_zone_pct
+                float risk = entry_px - sl_long
+                if risk > 0
+                    float tp_target = entry_px + target_rr * risk
+                    float g_top = math.max(entry_px,tp_target)
+                    float g_bot = math.min(entry_px,tp_target)
+                    draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70) // green profit zone
+                    float r_top = math.max(entry_px,sl_long)
+                    float r_bot = math.min(entry_px,sl_long)
+                    draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)  // red risk zone
+                    draw_or_update_entry_line(left_t,right_t,entry_px)
+            // SHORT visuals
+            if ctx_type == "Supply"
+                float sl_short = z_top + zone_h * sl_zone_pct
+                float risk = sl_short - entry_px
+                if risk > 0
+                    float tp_target_s = entry_px - target_rr * risk
+                    float g_top_s = math.max(entry_px,tp_target_s)
+                    float g_bot_s = math.min(entry_px,tp_target_s)
+                    draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
+                    float r_top_s = math.max(entry_px,sl_short)
+                    float r_bot_s = math.min(entry_px,sl_short)
+                    draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
+                    draw_or_update_entry_line(left_t,right_t,entry_px)
+    else
+        delete_pos_boxes()
+// ============================================================================
+
+// === Compact trade id "YYMMDD.ZZZ" (ZZZ = order number)
 zero2(n) => n < 10 ? "0"+str.tostring(n) : str.tostring(n)
 zero3(n) => n < 10 ? "00"+str.tostring(n) : n < 100 ? "0"+str.tostring(n) : str.tostring(n)
+var order_no_arr = array.new_int()
+if barstate.isfirst
+    array.push(order_no_arr,0)
+next_order_no() =>
+    int cur = array.get(order_no_arr,0)
+    int nxt = cur + 1
+    array.set(order_no_arr,0,nxt)
+    nxt
 make_trade_id() =>
-    string y  = str.tostring(year)
-    string mo = zero2(month)
-    string d  = zero2(dayofmonth)
-    string h  = zero2(hour)
-    string mi = zero2(minute)
-    string s  = zero2(second)
-    int ms    = int(math.round(time % 1000))
-    y+mo+d+h+mi+s+"."+zero3(ms)
+    int yy = year % 100
+    zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero3(next_order_no())
 
-// === TI-22: helper that ALWAYS couples label creation with alert; used everywhere B/S labels are drawn
-make_label_and_alert(sig,y,tf_lbl) =>
-    color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
-    label_style = sig == "B" ? label.style_label_up : label.style_label_down
-    label.new(bar_index,y,sig,color=c,textcolor=color.white,style=label_style,size=size.tiny)
-    alert(sig+" "+syminfo.ticker+" "+tf_lbl+" vol="+str.tostring(volume),alert.freq_once_per_bar_close)
+// === Unified label+alert+entry handler (B/S -> entry unless already same direction)
+handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
+    if show_entries
+        color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
+        label_style = sig == "B" ? label.style_label_up : label.style_label_down
+        label.new(bar_index,y,sig,color=c,textcolor=color.white,style=label_style,size=size.tiny)
+        alert(sig+" "+syminfo.ticker+" "+tf_lbl+" vol="+str.tostring(volume),alert.freq_once_per_bar_close)
+    if exec_strategy
+        float zone_h = zone_top - zone_bottom
+        if sig == "B"
+            bool same_dir = strategy.position_size > 0
+            if not same_dir
+                if strategy.position_size < 0
+                    string exit_idS = array.get(pos_entry_id_arr,0)
+                    if exit_idS != ""
+                        strategy.close("SHORT",comment=exit_idS)
+                        clear_position_context()
+                        delete_pos_boxes()
+                float sl_long = zone_bottom - zone_h * sl_zone_pct
+                string new_id = make_trade_id()
+                strategy.entry("LONG",strategy.long,comment=new_id)
+                strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
+                set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
+        if sig == "S"
+            bool same_dirS = strategy.position_size < 0
+            if not same_dirS
+                if strategy.position_size > 0
+                    string exit_idL = array.get(pos_entry_id_arr,0)
+                    if exit_idL != ""
+                        strategy.close("LONG",comment=exit_idL)
+                        clear_position_context()
+                        delete_pos_boxes()
+                float sl_short = zone_top + zone_h * sl_zone_pct
+                string new_idS = make_trade_id()
+                strategy.entry("SHORT",strategy.short,comment=new_idS)
+                strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
+                set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
+
+// === Close on opposite signal (same TF) using same label as open
+maybe_close_on_signal(sig,tf_lbl) =>
+    if exec_strategy and strategy.position_size != 0
+        string ctx_tf = array.get(pos_tf_label_arr,0)
+        string ctx_type = array.get(pos_zone_type_arr,0)
+        string ctx_id = array.get(pos_entry_id_arr,0)
+        if ctx_tf != "" and ctx_id != "" and tf_lbl == ctx_tf
+            if (ctx_type == "Demand" and sig == "S") or (ctx_type == "Supply" and sig == "B")
+                if strategy.position_size > 0
+                    strategy.close("LONG",comment=ctx_id)
+                if strategy.position_size < 0
+                    strategy.close("SHORT",comment=ctx_id)
+                clear_position_context()
+                delete_pos_boxes()
 
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_hist,atr_hist,time_hist) =>
@@ -323,7 +498,7 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
             array.pop(open_hist),array.pop(high_hist),array.pop(low_hist),array.pop(close_hist),array.pop(atr_hist),array.pop(time_hist)
         if array.size(open_hist) >= max_small_candles + 2
             float cur_open  = safe_get_float(open_hist,0,"open_hist@cur")
-            float cur_close = safe_get_float(close_hist,0,"close_hist@cur")
+            float cur_close = safe_get_float(close_hist,0,"open_hist@cur2")
             float cur_atr   = safe_get_float(atr_hist,0,"atr_hist@cur")
             if not na(cur_open) and not na(cur_close) and not na(cur_atr)
                 float cur_body = body_size_mtf(cur_open,cur_close)
@@ -370,7 +545,7 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                         leg_in_index  := idx_candidate
                     if valid_pattern and leg_in_index > 0
                         float leg_open  = safe_get_float(open_hist,leg_in_index,"open_hist@legin")
-                        float leg_close = safe_get_float(close_hist,leg_in_index,"close_hist@legin")
+                        float leg_close = safe_get_float(close_hist,leg_in_index,"open_hist@legin2")
                         if not na(leg_open) and not na(leg_close)
                             string leg_color = is_green_mtf(leg_open,leg_close) ? "green" : is_red_mtf(leg_open,leg_close) ? "red" : "na"
                             string zone_type = na, string zone_title = na
@@ -400,48 +575,21 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                                     if not na(oldest.zone_box)
                                         box.delete(oldest.zone_box)
                                 ti2_cull_overlaps_same_tf()
-                                float zone_h = zone_top - zone_bottom
                                 if zone_type == "Demand"
-                                    if exec_strategy
-                                        if strategy.position_size < 0
-                                            string exit_idS = safe_get_str(pos_entry_id_arr,0,"pos_entry_id_arr@close_short")
-                                            strategy.close("SHORT",comment=exit_idS)
-                                            clear_position_context()
-                                        if strategy.position_size <= 0
-                                            string new_id = make_trade_id()
-                                            float sl_long = zone_bottom - zone_h * sl_zone_pct
-                                            strategy.entry("LONG",strategy.long,comment=new_id)
-                                            strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
-                                            set_position_context(display_tf_label,zone_type,zone_top,zone_bottom,new_id)
-                                    if show_entries
-                                        make_label_and_alert("B",low,display_tf_label)
+                                    handle_signal_and_entry("B",low,display_tf_label,zone_top,zone_bottom,zone_type)
+                                    maybe_close_on_signal("B",display_tf_label)
                                 if zone_type == "Supply"
-                                    if exec_strategy
-                                        if strategy.position_size > 0
-                                            string exit_idL = safe_get_str(pos_entry_id_arr,0,"pos_entry_id_arr@close_long")
-                                            strategy.close("LONG",comment=exit_idL)
-                                            clear_position_context()
-                                        if strategy.position_size >= 0
-                                            string new_idS = make_trade_id()
-                                            float sl_short = zone_top + zone_h * sl_zone_pct
-                                            strategy.entry("SHORT",strategy.short,comment=new_idS)
-                                            strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
-                                            set_position_context(display_tf_label,zone_type,zone_top,zone_bottom,new_idS)
-                                    if show_entries
-                                        make_label_and_alert("S",high,display_tf_label)
+                                    handle_signal_and_entry("S",high,display_tf_label,zone_top,zone_bottom,zone_type)
+                                    maybe_close_on_signal("S",display_tf_label)
 
-// === TI-7: Rejection detection helpers and function ===
-within_zone(val,top,bottom) =>
-    val <= top and val >= bottom
-
-// (kept; still can generate B/S on retests; alerts tied strictly to label creation)
+// === TI-7: Rejection detection ===
+within_zone(val,top,bottom) => val <= top and val >= bottom
 detect_rejections() =>
     if array.size(active_zones) > 0
-        float atr_now = ta.atr(atr_length)
-        float min_reject_body = atr_now * rejection_atr_mult
+        float min_reject_body = atr_ct * rejection_atr_mult
         float body = math.abs(close - open)
         float candle_range = high - low
-        float min_reject_range = atr_now * rejection_atr_mult
+        float min_reject_range = atr_ct * rejection_atr_mult
         bool green = close > open
         bool red   = close < open
         for i = 0 to array.size(active_zones) - 1
@@ -455,39 +603,24 @@ detect_rejections() =>
                 bool touched = low <= z.top
                 bool left_up = close > z.top
                 bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if show_entries and touched and left_up and strong_up
-                    make_label_and_alert("B",low,z.tf_label)
+                if touched and left_up and strong_up
+                    handle_signal_and_entry("B",low,z.tf_label,z.top,z.bottom,z.zone_type)
+                    maybe_close_on_signal("B",z.tf_label)
             if z.zone_type == "Supply"
                 bool touched = high >= z.bottom
                 bool left_dn = close < z.bottom
                 bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if show_entries and touched and left_dn and strong_dn
-                    make_label_and_alert("S",high,z.tf_label)
+                if touched and left_dn and strong_dn
+                    handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
+                    maybe_close_on_signal("S",z.tf_label)
 
-// === TI-9: exit when reaching opposite zone of the same timeframe label
+// === Legacy exit manager disabled by TI-40 (hold until opposite signal)
 manage_exits_same_tf() =>
-    if strategy.position_size != 0
-        string ctx_tf = safe_get_str(pos_tf_label_arr,0,"pos_tf_label_arr@manage_exits")
-        string ctx_id = safe_get_str(pos_entry_id_arr,0,"pos_entry_id_arr@manage_exits")
-        if ctx_tf != "" and ctx_id != ""
-            for i = 0 to array.size(active_zones) - 1
-                ZoneData z = safe_get_zone(active_zones,i,"active_zones@manage_exits")
-                if na(z)
-                    continue
-                if z.tf_label == ctx_tf
-                    if strategy.position_size > 0 and z.zone_type == "Supply" and high >= z.bottom
-                        strategy.close("LONG",comment=ctx_id)
-                        clear_position_context()
-                        break
-                    if strategy.position_size < 0 and z.zone_type == "Demand" and low <= z.top
-                        strategy.close("SHORT",comment=ctx_id)
-                        clear_position_context()
-                        break
+    0
 
-// === TI-33: MTF Trend indicator (table, bottom-right) ===
-var table trend_tbl = table.new(position.bottom_right,5,1) // TI-33
-trend_color(is_up) => is_up ? color.new(color.green,0) : color.new(color.red,0) // TI-33
-
+// === TI-33: MTF Trend indicator (table, bottom-right)
+var table trend_tbl = table.new(position.bottom_right,5,1)
+trend_color(is_up) => is_up ? color.new(color.green,0) : color.new(color.red,0)
 update_trend_table() =>
     bool ct_up = ta.ema(close,ema_fast_len) > ta.ema(close,ema_slow_len)
     [o60,c60] = request.security(syminfo.tickerid,"60",[open,close],lookahead=barmerge.lookahead_off)
@@ -504,7 +637,7 @@ update_trend_table() =>
     table.cell(trend_tbl,3,0,"D1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(d1_up),text_size=size.huge)
     table.cell(trend_tbl,4,0,"W",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(w_up),text_size=size.huge)
 
-// === Main orchestration placed at the bottom ===
+// === Main
 main() =>
     if show_60
         detect_mtf_patterns_universal("60","60M",mtf_open_history_60,mtf_high_history_60,mtf_low_history_60,mtf_close_history_60,mtf_atr_history_60,mtf_time_history_60)
@@ -518,7 +651,8 @@ main() =>
     detect_rejections()
     if exec_strategy
         manage_exits_same_tf()
+    update_position_visuals()   // <— visualization updated as requested
     update_trend_table()
 
-// === Run main ===
+// Run
 main()

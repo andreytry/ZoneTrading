@@ -893,6 +893,7 @@ TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
 update the script
 
+Generate entry at EACH B/S except for when the position in the same direction is ALREADY HELD
 Take profit at 1.5R (setting Risk/Reward)    
 After the 1.5RR is reached - you keep holding UNTIL THE RISK/REWARD IS REACHED. After that you CONTINUE HOLDING UNTIL THE OPPOSIT SIGNAL IS PRODUCED 
 Stoploss - no change!!!
@@ -901,6 +902,9 @@ Make STRTEGY LABELS shorter - like   "YYMMDD.ZZZ" - this is the format to implem
 The position close must have the SAME LABEL as POSITION OPEN
 Visualize the positions inluding takeprofit and stoploss in the standard position graphics THIS IS IMPORTANT!!! 
 Red rectangle for stoploss, green - for takeprofit - standard position banner graphics
+The position visualization must look like this see screenshot, include entyr price, 
+dark red transparent rectangle from entry to stop loss, dark green transparent rectangle from entry to take profit!  
+The width of the position should be from the entry candle to the current candle!
 
 
 
@@ -923,18 +927,13 @@ TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
 
 =================================
-//TI-3 EMA + Supply/Demand
+//TI-3 Strategy - enter only when B/S 2R
 
-update the strategy
+update the script
 
-Add additional entry check
-COnsider entry on B and S ONLY if the entry candle opens within 0.5 ATR (Setting EMA Proimity) from the EMA100 
-
-If The EMA proximity parameter is 0 or negative or not specified - ignore the rule and keep all entries on B and S
-
-Set take profit
-
-
+Implement additional condition - enter when there is B or S AND the entry candle opens in the proximity of a EMA 50 or EMA100 or EMA200
+The Candle should be n the direction of of the trend meaning H1 and H4 must be green for a long position or RED for a short position.
+ 
 
 
 Mark the changes with user story ID in the comment above
@@ -952,3 +951,4 @@ Dont modify global vriables inside a function
 
 
 TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
+

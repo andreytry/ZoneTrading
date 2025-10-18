@@ -1,5 +1,5 @@
 //@version=5
-// TI-40: Replace TP1 & Minimum Entry R with Target RR (default 1.5R). Target RR is a visualization/milestone only; do NOT close there — keep holding until opposite signal. Visualize positions only when (1) Execute strategy is ON and (2) Visualize Positions is ON. B/S and entry are connected (enter unless already in same direction). Same label on close as on open. 
+// TI-40: Replace TP1 & Minimum Entry R with Target RR (default 1.5R). Target RR is a visualization/milestone only; do NOT close there — keep holding until opposite signal. Visualize positions only when (1) Execute strategy is ON and (2) Visualize Positions is ON. B/S and entry are connected (enter unless already in same direction). Same label on close as on open.
 // TI-9: place trades also *when a new zone is formed* (strong departure candle)
 // TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
 // TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
@@ -24,7 +24,6 @@ group_params = "Detection Settings"
 initial_length   = input.int(100,"Initial Zone Length (bars)",group=group_params)
 days_back        = input.int(100,"Draw Zones For Last N Days",group=group_params)
 atr_length       = input.int(14,"ATR Period",group=group_params)
-// TI-33: default 0.5 (was 0.8)
 long_atr_filter  = input.float(0.5,"Long Current Candle min body as % of ATR",step=0.01,group=group_params)
 max_long_short_ratio = input.float(0.5,"Max Long/Short Ratio for small candles",step=0.01,group=group_params)
 leg_out_leg_in_ratio = input.float(0.25,"Leg Out/Leg In Ratio",step=0.01,group=group_params)
@@ -32,15 +31,14 @@ breach_threshold = input.float(0.25,"Breach Threshold (% of zone height)",step=0
 max_small_candles = input.int(10,"Max Small Candles in Zone",minval=1,maxval=50,group=group_params)
 max_wick_ratio = input.float(10,"Max wick length to body ratio",step=0.01,group=group_params)
 max_zones = input.int(200,"Max Active Zones",minval=10,maxval=200,group=group_params)
-// TI-33: default 5.0 (was 2.5)
 range_mult = input.float(5.0,"Zone distance filter (× Daily Range)",step=0.1,group=group_params)
 
 // === TI-7: Rejection candle body threshold input (× ATR) ===
 rejection_atr_mult = input.float(0.5,"Rejection Candle Min Body (× ATR)",minval=0.0,step=0.05,group=group_params)
 
 // === TI-26: Separate toggles
-show_entries  = input.bool(true,"Show entries",group=group_params)   // TI-26
-exec_strategy = input.bool(false,"Execute strategy",group=group_params)   // TI-26
+show_entries  = input.bool(true,"Show entries",group=group_params)
+exec_strategy = input.bool(false,"Execute strategy",group=group_params)
 
 // === TI-40: Visualization controls ===
 group_vis = "Visualization"
@@ -48,8 +46,8 @@ visualize_positions = input.bool(true,"Visualize Positions",group=group_vis)
 target_rr = input.float(1.5,"Target RR (R)",minval=0.1,step=0.1,group=group_vis)
 
 // === TI-33: Trend EMA settings (CT uses these) ===
-ema_fast_len = input.int(20,"Trend EMA Fast (CT)",minval=1,group=group_params) // TI-33
-ema_slow_len = input.int(50,"Trend EMA Slow (CT)",minval=1,group=group_params) // TI-33
+ema_fast_len = input.int(20,"Trend EMA Fast (CT)",minval=1,group=group_params)
+ema_slow_len = input.int(50,"Trend EMA Slow (CT)",minval=1,group=group_params)
 
 // === TI-9: Stop loss distance as % of zone height (outside the zone)
 sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0.0,step=0.01,group=group_params)
@@ -69,7 +67,7 @@ type ZoneData
     string tf_label
     string label_text
     int   small_cnt
-    int   legout_time  // TI-7
+    int   legout_time
 
 // === Arrays to store zone data ===
 var array<ZoneData> active_zones = array.new<ZoneData>()
@@ -106,58 +104,52 @@ var array<float> mtf_close_history_ct = array.new<float>()
 var array<float> mtf_atr_history_ct   = array.new<float>()
 var array<int>   mtf_time_history_ct  = array.new<int>()
 
-// === Daily range (computed OUTSIDE loops/conditionals) ===
+// === Daily range ===
 [dHighD,dLowD] = request.security(syminfo.tickerid,"D",[high,low],lookahead=barmerge.lookahead_off)
 daily_range = dHighD - dLowD
 
-// === Global ATR series (consistency) ===
+// === Global ATR (consistency) ===
 atr_ct = ta.atr(atr_length)
 
-// Helper: current-range check
+// === Helpers ===
 is_zone_in_range(_top,_bottom) =>
     float mid = (_top + _bottom) * 0.5
     float denom = math.max(daily_range,syminfo.mintick)
     float norm = math.abs(close - mid) / denom
     norm <= range_mult
 
-// === Breach check ===
 is_zone_breached(zone_data) =>
     float zone_height = zone_data.top - zone_data.bottom
     float breach_amount = zone_height * breach_threshold
     zone_data.zone_type == "Supply" ? high > zone_data.top + breach_amount : low < zone_data.bottom - breach_amount
 
-// === TI-33: SAFE INDEX HELPERS (diagnostics) ===
+// === SAFE helpers ===
 diag_oob(where,idx,sz) =>
     label.new(bar_index,high,where+" idx="+str.tostring(idx)+" size="+str.tostring(sz),style=label.style_label_left,textcolor=color.black,color=color.yellow,size=size.tiny)
-
 idx_in_bounds_float(arr,idx,where) =>
     int sz = array.size(arr)
     bool ok = idx >= 0 and idx < sz
     if not ok
         diag_oob(where,idx,sz)
     ok
-
 idx_in_bounds_int(arr,idx,where) =>
     int sz = array.size(arr)
     bool ok = idx >= 0 and idx < sz
     if not ok
         diag_oob(where,idx,sz)
     ok
-
 idx_in_bounds_str(arr,idx,where) =>
     int sz = array.size(arr)
     bool ok = idx >= 0 and idx < sz
     if not ok
         diag_oob(where,idx,sz)
     ok
-
 idx_in_bounds_zone(arr,idx,where) =>
     int sz = array.size(arr)
     bool ok = idx >= 0 and idx < sz
     if not ok
         diag_oob(where,idx,sz)
     ok
-
 safe_get_float(arr,idx,where) => idx_in_bounds_float(arr,idx,where) ? array.get(arr,idx) : na
 safe_get_int(arr,idx,where) => idx_in_bounds_int(arr,idx,where) ? array.get(arr,idx) : na
 safe_get_str(arr,idx,where) => idx_in_bounds_str(arr,idx,where) ? array.get(arr,idx) : ""
@@ -199,7 +191,7 @@ find_zone_boundaries_universal(start_idx,num_small_candles,zone_type,open_hist,h
                     zone_bottom := math.min(zone_bottom,math.min(oi,ci))
     [zone_top,zone_bottom]
 
-// === TI-2: Overlap detection helper (same timeframe) ===
+// === Overlap detection helper (same timeframe) ===
 ti2_overlap(z1,z2) => not (z1.bottom > z2.top or z2.bottom > z1.top)
 
 // === Extend / cull + RANGE TOGGLING ===
@@ -229,7 +221,7 @@ update_zones() =>
                 array.set(active_zones,i,z3)
             i -= 1
 
-// === TI-2: Overlap culling pass — keep earliest zone (earliest creation_bar_time) per timeframe ===
+// === Overlap culling pass — keep earliest zone per timeframe ===
 ti2_cull_overlaps_same_tf() =>
     int i = 0
     while i < array.size(active_zones)
@@ -260,18 +252,20 @@ ti2_cull_overlaps_same_tf() =>
                 j += 1
         i += 1
 
-// === Position context (arrays for safe mutation inside functions)
+// === Position context (arrays)
 var pos_tf_label_arr    = array.new_string()
 var pos_zone_type_arr   = array.new_string()
 var pos_zone_top_arr    = array.new_float()
 var pos_zone_bottom_arr = array.new_float()
 var pos_entry_id_arr    = array.new_string()
+var pos_entry_px_arr    = array.new_float()             // TI-40: store intended entry price to draw on entry bar
 if barstate.isfirst
     array.push(pos_tf_label_arr,"")
     array.push(pos_zone_type_arr,"")
     array.push(pos_zone_top_arr,na)
     array.push(pos_zone_bottom_arr,na)
     array.push(pos_entry_id_arr,"")
+    array.push(pos_entry_px_arr,na)
 
 set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_tf_label_arr,0,tf_lbl)
@@ -279,6 +273,7 @@ set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
     array.set(pos_zone_top_arr,0,z_top)
     array.set(pos_zone_bottom_arr,0,z_bottom)
     array.set(pos_entry_id_arr,0,entry_id)
+    array.set(pos_entry_px_arr,0,close)                 // store intended entry now (entry bar)
 
 clear_position_context() =>
     array.set(pos_tf_label_arr,0,"")
@@ -286,6 +281,7 @@ clear_position_context() =>
     array.set(pos_zone_top_arr,0,na)
     array.set(pos_zone_bottom_arr,0,na)
     array.set(pos_entry_id_arr,0,"")
+    array.set(pos_entry_px_arr,0,na)
 
 // === TP/SL visuals (rectangles)
 var tp_box_arr = array.new_box()
@@ -305,8 +301,9 @@ delete_pos_boxes() =>
         array.set(sl_box_arr,0,na)
 
 draw_or_update_box(is_tp,price,color_box) =>
-    float y1 = price + syminfo.mintick*2.0
-    float y2 = price - syminfo.mintick*2.0
+    float pad = math.max(atr_ct * 0.02, syminfo.mintick * 2.0)
+    float y1 = price + pad
+    float y2 = price - pad
     if is_tp
         box bx_tp = array.get(tp_box_arr,0)
         if na(bx_tp)
@@ -327,14 +324,16 @@ draw_or_update_box(is_tp,price,color_box) =>
             box.set_bottom(bx_sl,y2)
 
 update_position_visuals() =>
-    // Draw only if both toggles are ON and a position exists
-    if exec_strategy and visualize_positions and strategy.position_size != 0
+    bool can_draw = exec_strategy and visualize_positions and (strategy.position_size != 0 or (array.get(pos_entry_id_arr,0) != ""))
+    if can_draw
         string ctx_type = array.get(pos_zone_type_arr,0)
         float z_top = array.get(pos_zone_top_arr,0)
         float z_bot = array.get(pos_zone_bottom_arr,0)
-        if not na(z_top) and not na(z_bot)
+        float entry_px_ctx = array.get(pos_entry_px_arr,0)
+        float entry_px_live = strategy.position_size != 0 ? strategy.position_avg_price : na
+        float entry_px = na(entry_px_live) ? entry_px_ctx : entry_px_live
+        if true
             float zone_h = z_top - z_bot
-            float entry_px = strategy.position_avg_price
             if ctx_type == "Demand"
                 float sl_long = z_bot - zone_h * sl_zone_pct
                 float risk = entry_px - sl_long
@@ -352,7 +351,7 @@ update_position_visuals() =>
     else
         delete_pos_boxes()
 
-// === Compact trade id "YYMMDD.ZZZ" (ZZZ = order number)
+// === Compact trade id "YYMMDD.ZZZ"
 zero2(n) => n < 10 ? "0"+str.tostring(n) : str.tostring(n)
 zero3(n) => n < 10 ? "00"+str.tostring(n) : n < 100 ? "0"+str.tostring(n) : str.tostring(n)
 var order_no_arr = array.new_int()
@@ -522,7 +521,6 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
 
 // === TI-7: Rejection detection ===
 within_zone(val,top,bottom) => val <= top and val >= bottom
-
 detect_rejections() =>
     if array.size(active_zones) > 0
         float min_reject_body = atr_ct * rejection_atr_mult
