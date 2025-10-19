@@ -57,8 +57,8 @@ sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0
 // [US-TI-43] Max risk gate: if |entry-stop| exceeds ATR × multiplier, skip the entry
 max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
 
-// [US-TI-36] Follow strong trend — suppress opposite signals when EMAs are strictly stacked
-follow_strong_trend = input.bool(true,"Follow strong trend",group=group_params,tooltip="If EMA20 < EMA50 < EMA100 < EMA200, B signals are suppressed. If EMA20 > EMA50 > EMA100 > EMA200, S signals are suppressed. Applies to labels/alerts and entries.")
+// TI-36: Position in the direction of trend VERSION4 — toggle updated (default OFF) and tooltip explains next-HTF live candle filter
+follow_strong_trend = input.bool(false,"Follow strong trend",group=group_params,tooltip="When ON: allow only LONG if the NEXT higher timeframe live candle is GREEN; allow only SHORT if it is RED. Mapping: 1→60, 5→60, 15→240, 60→240, 240→D, D→W. Uses live (unfinished) candles and may repaint.")
 
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
@@ -524,18 +524,34 @@ make_trade_id() =>
     int yy = year % 100
     zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero4(next_order_no())
 
+// TI-36: Position in the direction of trend VERSION4 — helper: map current TF to next higher TF
+next_higher_timeframe(tf) =>
+    tf == "1" ? "60" : tf == "5" ? "60" : tf == "15" ? "240" : tf == "60" ? "240" : tf == "240" ? "D" : tf == "D" ? "W" : ""
+
+// === TI-47: Live HTF candle color (repainting by design) ===
+get_live_htf_up(tf) =>
+    [o, c] = request.security(syminfo.tickerid, tf, [open, close], lookahead=barmerge.lookahead_on)
+    c > o
+
+// TI-36: Position in the direction of trend VERSION4 — helper: apply live HTF candle gating
+should_block_by_next_htf(sig) =>
+    if not follow_strong_trend
+        false
+    else
+        string cur = timeframe.period
+        string nxt = next_higher_timeframe(cur)
+        if nxt == ""
+            false
+        else
+            bool up_live = get_live_htf_up(nxt)
+            bool block_long = not na(up_live) and (not up_live) and sig == "B"
+            bool block_short = not na(up_live) and up_live and sig == "S"
+            block_long or block_short
+
 // === Unified label+alert+entry handler (B/S -> entry unless same direction)
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
-    // [US-TI-36] Strong trend filter (EMA stack only): block B in downtrend; block S in uptrend
-    bool blocked = false
-    if follow_strong_trend
-        float ema20 = ta.ema(close,20)
-        float ema50 = ta.ema(close,50)
-        float ema100 = ta.ema(close,100)
-        float ema200 = ta.ema(close,200)
-        bool strong_up = ema20 > ema50 and ema50 > ema100 and ema100 > ema200
-        bool strong_down = ema20 < ema50 and ema50 < ema100 and ema100 < ema200
-        blocked := (sig == "B" and strong_down) or (sig == "S" and strong_up)
+    // TI-36: Position in the direction of trend VERSION4 — remove EMA-stack suppression; use next-HTF live candle filter instead
+    bool blocked = should_block_by_next_htf(sig)
 
     if not blocked
         if show_entries
@@ -785,10 +801,7 @@ manage_exits_same_tf() => 0
 var table trend_tbl = table.new(position.bottom_right,5,1)
 trend_color(is_up) => is_up ? color.new(color.green,0) : color.new(color.red,0)
 
-// === TI-47: Live HTF candle color (repainting by design) ===
-get_live_htf_up(tf) =>
-    [o, c] = request.security(syminfo.tickerid, tf, [open, close], lookahead=barmerge.lookahead_on)
-    c > o
+
 
 // === Trend squares (CT uses EMAs; HTFs use unfinished live bars) ===
 update_trend_table() =>
@@ -800,11 +813,11 @@ update_trend_table() =>
     bool d1_up = get_live_htf_up("D")
     bool w_up  = get_live_htf_up("W")
 
-    table.cell(trend_tbl,0,0,"CT", text_color=color.white, text_halign=text.align_center, text_valign=text.align_center, bgcolor=ct_up ? color.new(color.green,0) : color.new(color.red,0), text_size=size.huge)
-    table.cell(trend_tbl,1,0,"H1", text_color=color.white, text_halign=text.align_center, text_valign=text.align_center, bgcolor=h1_up ? color.new(color.green,0) : color.new(color.red,0), text_size=size.huge)
-    table.cell(trend_tbl,2,0,"H4", text_color=color.white, text_halign=text.align_center, text_valign=text.align_center, bgcolor=h4_up ? color.new(color.green,0) : color.new(color.red,0), text_size=size.huge)
-    table.cell(trend_tbl,3,0,"D1", text_color=color.white, text_halign=text.align_center, text_valign=text.align_center, bgcolor=d1_up ? color.new(color.green,0) : color.new(color.red,0), text_size=size.huge)
-    table.cell(trend_tbl,4,0,"W",  text_color=color.white, text_halign=text.align_center, text_valign=text.align_center, bgcolor=w_up  ? color.new(color.green,0) : color.new(color.red,0), text_size=size.huge)
+    table.cell(trend_tbl,0,0,"CT",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=ct_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
+    table.cell(trend_tbl,1,0,"H1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h1_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
+    table.cell(trend_tbl,2,0,"H4",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h4_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
+    table.cell(trend_tbl,3,0,"D1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=d1_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
+    table.cell(trend_tbl,4,0,"W",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=w_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
 
 // === Optional broker sync — now a NO-OP (arrays are the only truth)
 sync_context_with_live_position() => 0
