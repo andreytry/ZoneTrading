@@ -1062,8 +1062,8 @@ TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
 update the script
 
-Take the long position when he m60 an h4 are green
-Take the short position when he m60 an h4 are red
+Take the long position when the CT is green
+Take the short position when the CT is red
 Introduce a setting "Take only in the direction of trend"  
 this setting controld if we show the positions aligned with the trend (true) or we can take positions in any directions (false)
 
