@@ -936,7 +936,35 @@ TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
 
 =================================
-//TI-3 Strategy - enter only when B/S 2R
+//TI-43 Limit position by ATR
+
+update the script
+
+
+Introduce max position size (ATR)  take the position only in case the risk is < MaxPositionSize 
+
+
+
+Mark the changes with user story ID in the comment above
+NEVER change the name of the script!!!
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
+TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
+
+
+=================================
+//TI-3 Trade from EMA50/100/200
 
 update the script
 
@@ -964,3 +992,97 @@ Dont modify global vriables inside a function
 
 TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
 
+
+
+
+
+=================================
+//TI-44 Set SL to BE and move target once reached
+
+update the script
+
+Once Target is reached start moving the target boundary of the green position rectangle with the price so it reflects current price actually 
+ONce 50% of the distance to the target is eached, set SL to Break Even. Add a setting SL to BreakEven at 50% default true
+
+
+
+
+Mark the changes with user story ID in the comment above
+NEVER change the name of the script!!!
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
+TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
+
+
+
+
+
+
+=================================
+//TI-44 Set SL to BE and move target once reached
+
+update the script
+
+Once Target is reached start moving the target boundary of the green position rectangle with the price so it reflects current price actually 
+ONce 50% of the distance to the target is eached, set SL to Break Even. Add a setting SL to BreakEven at 50% default true
+
+
+
+
+Mark the changes with user story ID in the comment above
+NEVER change the name of the script!!!
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
+TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
+
+=================================
+//TI-36 Position in the direction of trend
+
+update the script
+
+Take the long position when he m60 an h4 are green
+Take the short position when he m60 an h4 are red
+Introduce a setting "Take only in the direction of trend"  
+this setting controld if we show the positions aligned with the trend (true) or we can take positions in any directions (false)
+
+
+
+
+Mark the changes with user story ID in the comment above
+NEVER change the name of the script!!!
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
+TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
