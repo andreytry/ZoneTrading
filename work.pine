@@ -5,9 +5,6 @@
 // TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
 // TI-33: MTF Trend indicator — squares CT/H1/H4/D1/W at bottom-right using EMA20/50 for CT, candle color for others
 // TI-43: Limit position by ATR — add Max Position Risk (× ATR) gate; only enter if |entry-stop| <= ATR × multiplier
-// TI-44: Set SL to BE and move target once reached — BE at 50% option and dynamic target box after Target
-// TI-44 FIX: Close on SL hit immediately and clear visuals/context
-// TI-49: Position lifecycle wrappers + watchdog to prevent stuck context; remove box-registry code that caused type error
 
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
@@ -57,11 +54,8 @@ ema_slow_len = input.int(50,"Trend EMA Slow (CT)",minval=1,group=group_params)
 // === TI-9: Stop loss distance as % of zone height (outside the zone)
 sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0.0,step=0.01,group=group_params)
 
-// [US-TI-43] Max risk gate
-max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
-
-// [US-TI-44] BE option
-sl_to_break_even_half = input.bool(true,"SL to BreakEven at 50%",group=group_params)
+// [US-TI-43] Max risk gate: if |entry-stop| exceeds ATR × multiplier, skip the entry
+max_position_atr_mult = input.float(3.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
@@ -115,9 +109,11 @@ var array<float> mtf_close_history_ct = array.new<float>()
 var array<float> mtf_atr_history_ct = array.new<float>()
 var array<int> mtf_time_history_ct = array.new<int>()
 
-// === Daily range & ATR ===
+// === Daily range ===
 [dHighD,dLowD] = request.security(syminfo.tickerid,"D",[high,low],lookahead=barmerge.lookahead_off)
 daily_range = dHighD - dLowD
+
+// === Global ATR ===
 atr_ct = ta.atr(atr_length)
 
 // Helper: current-range check
@@ -164,7 +160,7 @@ safe_get_int(arr,idx,where) => idx_in_bounds_int(arr,idx,where) ? array.get(arr,
 safe_get_str(arr,idx,where) => idx_in_bounds_str(arr,idx,where) ? array.get(arr,idx) : ""
 safe_get_zone(arr,idx,where) => idx_in_bounds_zone(arr,idx,where) ? array.get(arr,idx) : na
 
-// === VISUALS HELPERS (positions) — define BEFORE first use ===
+// === VISUALS (entry→TP and entry→SL) ===
 var tp_box_arr = array.new_box()
 var sl_box_arr = array.new_box()
 var entry_line_ar = array.new_line()
@@ -193,243 +189,6 @@ delete_pos_boxes() =>
         label.delete(lb)
         array.set(entry_lbl_arr,0,na)
 
-draw_or_update_box(is_tp,left_t,right_t,top,bottom,color_box,alpha_tp,alpha_sl) =>
-    if is_tp
-        box bx_tp = array.get(tp_box_arr,0)
-        if na(bx_tp)
-            bx_tp := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,60),border_color=color.new(color_box,0))
-            array.set(tp_box_arr,0,bx_tp)
-        else
-            box.set_left(bx_tp,left_t)
-            box.set_right(bx_tp,right_t)
-            box.set_top(bx_tp,top)
-            box.set_bottom(bx_tp,bottom)
-    else
-        box bx_sl = array.get(sl_box_arr,0)
-        if na(bx_sl)
-            bx_sl := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,60),border_color=color.new(color_box,0))
-            array.set(sl_box_arr,0,bx_sl)
-        else
-            box.set_left(bx_sl,left_t)
-            box.set_right(bx_sl,right_t)
-            box.set_top(bx_sl,top)
-            box.set_bottom(bx_sl,bottom)
-
-draw_or_update_entry_line(left_t,right_t,price) =>
-    line ln = array.get(entry_line_ar,0)
-    if na(ln)
-        ln := line.new(left_t,price,right_t,price,xloc=xloc.bar_time,extend=extend.none,color=color.new(color.white,0),width=1)
-        array.set(entry_line_ar,0,ln)
-    else
-        line.set_x1(ln,left_t)
-        line.set_x2(ln,right_t)
-        line.set_y1(ln,price)
-        line.set_y2(ln,price)
-    label lb = array.get(entry_lbl_arr,0)
-    string txt = "Entry: "+str.tostring(price,format.mintick)
-    if na(lb)
-        lb := label.new(right_t,price,txt,xloc=xloc.bar_time,style=label.style_label_left,textcolor=color.white,color=color.new(color.gray,70),size=size.tiny)
-        array.set(entry_lbl_arr,0,lb)
-    else
-        label.set_x(lb,right_t)
-        label.set_y(lb,price)
-        label.set_text(lb,txt)
-
-// ============================================================================
-// === Position context ===
-var pos_tf_label_arr = array.new_string()
-var pos_zone_type_arr = array.new_string()
-var pos_zone_top_arr = array.new_float()
-var pos_zone_bottom_arr = array.new_float()
-var pos_entry_id_arr = array.new_string()
-var pos_entry_px_arr = array.new_float()
-var pos_entry_time_arr = array.new_int()
-var pos_hit15_arr = array.new_bool()
-var pos_hitTarget_arr = array.new_bool()
-var pos_stop_px_arr = array.new_float()
-var pos_hitSL_arr = array.new_bool()
-var pos_side_arr = array.new_string()
-
-if barstate.isfirst
-    array.push(pos_tf_label_arr,"")
-    array.push(pos_zone_type_arr,"")
-    array.push(pos_zone_top_arr,na)
-    array.push(pos_zone_bottom_arr,na)
-    array.push(pos_entry_id_arr,"")
-    array.push(pos_entry_px_arr,na)
-    array.push(pos_entry_time_arr,na)
-    array.push(pos_hit15_arr,false)
-    array.push(pos_hitTarget_arr,false)
-    array.push(pos_stop_px_arr,na)
-    array.push(pos_hitSL_arr,false)
-    array.push(pos_side_arr,"")
-
-set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
-    array.set(pos_tf_label_arr,0,tf_lbl)
-    array.set(pos_zone_type_arr,0,z_type)
-    array.set(pos_zone_top_arr,0,z_top)
-    array.set(pos_zone_bottom_arr,0,z_bottom)
-    array.set(pos_entry_id_arr,0,entry_id)
-    array.set(pos_entry_px_arr,0,close)
-    array.set(pos_entry_time_arr,0,time)
-    array.set(pos_hit15_arr,0,false)
-    array.set(pos_hitTarget_arr,0,false)
-    array.set(pos_stop_px_arr,0,na)
-    array.set(pos_hitSL_arr,0,false)
-
-clear_position_context() =>
-    array.set(pos_tf_label_arr,0,"")
-    array.set(pos_zone_type_arr,0,"")
-    array.set(pos_zone_top_arr,0,na)
-    array.set(pos_zone_bottom_arr,0,na)
-    array.set(pos_entry_id_arr,0,"")
-    array.set(pos_entry_px_arr,0,na)
-    array.set(pos_entry_time_arr,0,na)
-    array.set(pos_hit15_arr,0,false)
-    array.set(pos_hitTarget_arr,0,false)
-    array.set(pos_stop_px_arr,0,na)
-    array.set(pos_hitSL_arr,0,false)
-    array.set(pos_side_arr,0,"")
-
-// === Virtual side helpers ===
-is_long_pos() => array.get(pos_side_arr,0) == "LONG"
-is_short_pos() => array.get(pos_side_arr,0) == "SHORT"
-is_flat_pos() => array.get(pos_side_arr,0) == ""
-
-// ============================================================================
-// === Trade id helpers ===
-zero2(n) => n < 10 ? "0"+str.tostring(n) : str.tostring(n)
-zero4(n) => n < 10 ? "000"+str.tostring(n) : n < 100 ? "00"+str.tostring(n) : n < 1000 ? "0"+str.tostring(n) : str.tostring(n)
-var order_no_arr = array.new_int()
-if barstate.isfirst
-    array.push(order_no_arr,0)
-next_order_no() =>
-    int cur = array.get(order_no_arr,0)
-    int nxt = cur + 1
-    array.set(order_no_arr,0,nxt)
-    nxt
-make_trade_id() =>
-    int yy = year % 100
-    zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero4(next_order_no())
-
-// ============================================================================
-// === [US-TI-49] Position lifecycle wrappers
-open_position(side,tf_lbl,z_type,z_top,z_bottom) =>
-    clear_position_context()
-    delete_pos_boxes()
-    string new_id = make_trade_id()
-    set_position_context(tf_lbl,z_type,z_top,z_bottom,new_id)
-    array.set(pos_side_arr,0,side)
-    new_id
-
-close_position(reason) =>
-    string ctx_id = array.get(pos_entry_id_arr,0)
-    if exec_strategy
-        if array.get(pos_side_arr,0) == "LONG" and strategy.position_size > 0
-            strategy.close("LONG",comment=ctx_id)
-        if array.get(pos_side_arr,0) == "SHORT" and strategy.position_size < 0
-            strategy.close("SHORT",comment=ctx_id)
-    clear_position_context()
-    delete_pos_boxes()
-
-// [US-TI-49 FIX] Safer watchdog: end-of-bar, exec-only, debounced, never calls strategy.close()
-watchdog_position_sweeper() =>
-    if exec_strategy
-        bool has_ctx = array.get(pos_entry_id_arr,0) != ""
-        if has_ctx
-            int t_entry = array.get(pos_entry_time_arr,0)
-            bool entry_time_ok = not na(t_entry)
-            int bar_ms = na(time[1]) ? 0 : (time - time[1])
-            bool aged_two_bars = entry_time_ok and (time - t_entry) >= 2 * bar_ms
-            bool live_flat = strategy.position_size == 0
-            // Only clear virtual context if we are definitely flat for a while
-            if live_flat and aged_two_bars
-                clear_position_context()
-                delete_pos_boxes()
-
-
-// ============================================================================
-// === Milestones strictly from Entry & Stop (no zone math) + BE @ 50%
-update_profit_milestones() =>
-    float entry_px_ctx = array.get(pos_entry_px_arr,0)
-    float entry_px_live = na
-    float entry_px = na(entry_px_live) ? entry_px_ctx : entry_px_live
-    float stop_px = array.get(pos_stop_px_arr,0)
-    if not na(entry_px) and not na(stop_px)
-        float risk = math.abs(entry_px - stop_px)
-        if risk > 0
-            bool is_long = stop_px < entry_px
-            float tgt = is_long ? entry_px + target_rr * risk : entry_px - target_rr * risk
-            if is_long
-                if high >= tgt
-                    array.set(pos_hit15_arr,0,true)
-                    array.set(pos_hitTarget_arr,0,true)
-            else
-                if low <= tgt
-                    array.set(pos_hit15_arr,0,true)
-                    array.set(pos_hitTarget_arr,0,true)
-            if sl_to_break_even_half
-                float half_tgt = is_long ? entry_px + 0.5 * target_rr * risk : entry_px - 0.5 * target_rr * risk
-                bool reached_half = is_long ? high >= half_tgt : low <= half_tgt
-                bool already_be = math.abs(array.get(pos_stop_px_arr,0) - entry_px) <= syminfo.mintick
-                if reached_half and not already_be
-                    array.set(pos_stop_px_arr,0,entry_px)
-                    if exec_strategy
-                        string ctx_id = array.get(pos_entry_id_arr,0)
-                        if is_long and strategy.position_size > 0
-                            strategy.exit("LONG-SL",from_entry="LONG",stop=entry_px,comment=ctx_id)
-                        if not is_long and strategy.position_size < 0
-                            strategy.exit("SHORT-SL",from_entry="SHORT",stop=entry_px,comment=ctx_id)
-
-// === SL-hit detector (intrabar) — close & clear immediately
-update_stop_hit_flag() =>
-    float e = array.get(pos_entry_px_arr,0)
-    float s = array.get(pos_stop_px_arr,0)
-    if not na(e) and not na(s)
-        bool is_long = s < e
-        bool hit = (is_long and low <= s) or (not is_long and high >= s)
-        if hit
-            array.set(pos_hitSL_arr,0,true)
-            close_position("stop_hit")
-
-// === VISUALS (entry→TP in green; entry→SL in red). After Target, green follows price.
-update_position_visuals() =>
-    bool can_draw = show_entries and (array.get(pos_entry_id_arr,0) != "")
-    if can_draw
-        float entry_px = array.get(pos_entry_px_arr,0)
-        float stop_px = array.get(pos_stop_px_arr,0)
-        int left_t = array.get(pos_entry_time_arr,0)
-        int bar_step = na(time[1]) ? 0 : (time - time[1])
-        int right_t = time + bar_step
-        if not na(entry_px) and not na(stop_px) and not na(left_t)
-            float risk = math.abs(entry_px - stop_px)
-            if risk > 0
-                bool is_long = stop_px < entry_px
-                bool tgt_hit = array.get(pos_hitTarget_arr,0)
-                if is_long
-                    float static_tp = entry_px + target_rr * risk
-                    float dyn_tp = tgt_hit ? close : static_tp
-                    float g_top = math.max(entry_px,dyn_tp)
-                    float g_bot = math.min(entry_px,dyn_tp)
-                    draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70)
-                    float r_top = math.max(entry_px,stop_px)
-                    float r_bot = math.min(entry_px,stop_px)
-                    draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)
-                    draw_or_update_entry_line(left_t,right_t,entry_px)
-                else
-                    float static_tp_s = entry_px - target_rr * risk
-                    float dyn_tp_s = tgt_hit ? close : static_tp_s
-                    float g_top_s = math.max(entry_px,dyn_tp_s)
-                    float g_bot_s = math.min(entry_px,dyn_tp_s)
-                    draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
-                    float r_top_s = math.max(entry_px,stop_px)
-                    float r_bot_s = math.min(entry_px,stop_px)
-                    draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
-                    draw_or_update_entry_line(left_t,right_t,entry_px)
-    else
-        delete_pos_boxes()
-
-// ============================================================================
 // === Zone boundaries ===
 find_zone_boundaries_universal(start_idx,num_small_candles,zone_type,open_hist,high_hist,low_hist,close_hist) =>
     float zone_top = na
@@ -527,8 +286,245 @@ ti2_cull_overlaps_same_tf() =>
                 j += 1
         i += 1
 
+// === Position context (single source of truth) ===
+var pos_tf_label_arr = array.new_string()
+var pos_zone_type_arr = array.new_string()
+var pos_zone_top_arr = array.new_float()
+var pos_zone_bottom_arr = array.new_float()
+var pos_entry_id_arr = array.new_string()
+var pos_entry_px_arr = array.new_float()
+var pos_entry_time_arr = array.new_int()
+var pos_hit15_arr = array.new_bool()
+var pos_hitTarget_arr = array.new_bool()
+var pos_stop_px_arr = array.new_float()
+var pos_hitSL_arr = array.new_bool()
+var pos_side_arr = array.new_string()
+var pos_sl_moved_be_arr = array.new_bool()
+
+if barstate.isfirst
+    array.push(pos_tf_label_arr,"")
+    array.push(pos_zone_type_arr,"")
+    array.push(pos_zone_top_arr,na)
+    array.push(pos_zone_bottom_arr,na)
+    array.push(pos_entry_id_arr,"")
+    array.push(pos_entry_px_arr,na)
+    array.push(pos_entry_time_arr,na)
+    array.push(pos_hit15_arr,false)
+    array.push(pos_hitTarget_arr,false)
+    array.push(pos_stop_px_arr,na)
+    array.push(pos_hitSL_arr,false)
+    array.push(pos_side_arr,"")
+    array.push(pos_sl_moved_be_arr,false)
+
+set_position_context(tf_lbl,z_type,z_top,z_bottom,entry_id) =>
+    array.set(pos_tf_label_arr,0,tf_lbl)
+    array.set(pos_zone_type_arr,0,z_type)
+    array.set(pos_zone_top_arr,0,z_top)
+    array.set(pos_zone_bottom_arr,0,z_bottom)
+    array.set(pos_entry_id_arr,0,entry_id)
+    array.set(pos_entry_px_arr,0,close)
+    array.set(pos_entry_time_arr,0,time)
+    array.set(pos_hit15_arr,0,false)
+    array.set(pos_hitTarget_arr,0,false)
+    array.set(pos_stop_px_arr,0,na)
+    array.set(pos_hitSL_arr,0,false)
+    array.set(pos_side_arr,0,"")
+    array.set(pos_sl_moved_be_arr,0,false)
+
+clear_position_context() =>
+    array.set(pos_tf_label_arr,0,"")
+    array.set(pos_zone_type_arr,0,"")
+    array.set(pos_zone_top_arr,0,na)
+    array.set(pos_zone_bottom_arr,0,na)
+    array.set(pos_entry_id_arr,0,"")
+    array.set(pos_entry_px_arr,0,na)
+    array.set(pos_entry_time_arr,0,na)
+    array.set(pos_hit15_arr,0,false)
+    array.set(pos_hitTarget_arr,0,false)
+    array.set(pos_stop_px_arr,0,na)
+    array.set(pos_hitSL_arr,0,false)
+    array.set(pos_side_arr,0,"")
+    array.set(pos_sl_moved_be_arr,0,false)
+
+// === Virtual side helpers ===
+is_long_pos() => array.get(pos_side_arr,0) == "LONG"
+is_short_pos() => array.get(pos_side_arr,0) == "SHORT"
+is_flat_pos() => array.get(pos_side_arr,0) == ""
+
+// === [US-TI-44] Milestones from entry & initial zone-derived SL (stable even after SL=BE)
+update_profit_milestones() =>
+    float entry_px = array.get(pos_entry_px_arr,0)
+    float z_top = array.get(pos_zone_top_arr,0)
+    float z_bot = array.get(pos_zone_bottom_arr,0)
+    bool long_side = is_long_pos()
+    if not na(entry_px) and not na(z_top) and not na(z_bot) and (is_long_pos() or is_short_pos())
+        float zone_h = z_top - z_bot
+        float initial_sl = long_side ? z_bot - zone_h * sl_zone_pct : z_top + zone_h * sl_zone_pct
+        float risk_initial = math.abs(entry_px - initial_sl)
+        if risk_initial > 0
+            float tp_px = long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
+            bool now_reached = long_side ? high >= tp_px : low <= tp_px
+            if now_reached
+                array.set(pos_hit15_arr,0,true)
+                array.set(pos_hitTarget_arr,0,true)
+
+// === SL-hit detector (intrabar)
+update_stop_hit_flag() =>
+    float e = array.get(pos_entry_px_arr,0)
+    float s = array.get(pos_stop_px_arr,0)
+    if not na(e) and not na(s)
+        bool is_long = s < e
+        bool hit = (is_long and low <= s) or (not is_long and high >= s)
+        if hit
+            array.set(pos_hitSL_arr,0,true)
+
+// === [US-TI-44] Move SL to BE at 50% progress to Target
+update_break_even_stop() =>
+    string id = array.get(pos_entry_id_arr,0)
+    if id != "" and (is_long_pos() or is_short_pos())
+        float entry_px = array.get(pos_entry_px_arr,0)
+        float z_top = array.get(pos_zone_top_arr,0)
+        float z_bot = array.get(pos_zone_bottom_arr,0)
+        float stop_px = array.get(pos_stop_px_arr,0)
+        bool moved = array.get(pos_sl_moved_be_arr,0)
+        if not na(entry_px) and not na(z_top) and not na(z_bot) and not moved
+            bool long_side = is_long_pos()
+            float zone_h = z_top - z_bot
+            float initial_sl = long_side ? z_bot - zone_h * sl_zone_pct : z_top + zone_h * sl_zone_pct
+            float risk_initial = math.abs(entry_px - initial_sl)
+            if risk_initial > 0
+                float tp_px = long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
+                float half_px = long_side ? entry_px + 0.5 * (tp_px - entry_px) : entry_px - 0.5 * (entry_px - tp_px)
+                bool crossed = long_side ? high >= half_px : low <= half_px
+                if crossed
+                    array.set(pos_stop_px_arr,0,entry_px)
+                    array.set(pos_sl_moved_be_arr,0,true)
+                    if exec_strategy
+                        if long_side
+                            strategy.exit("LONG-SL",from_entry="LONG",stop=entry_px,comment=id)
+                        else
+                            strategy.exit("SHORT-SL",from_entry="SHORT",stop=entry_px,comment=id)
+
+// === [US-TI-44] Close immediately when SL is hit (arrays own the truth)
+maybe_close_on_stop_hit() =>
+    bool hit = array.get(pos_hitSL_arr,0)
+    if hit
+        string id = array.get(pos_entry_id_arr,0)
+        if exec_strategy
+            if is_long_pos()
+                strategy.close("LONG",comment=id)
+            if is_short_pos()
+                strategy.close("SHORT",comment=id)
+        clear_position_context()
+        delete_pos_boxes()
+
+// === VISUAL DRAW HELPERS ===
+draw_or_update_box(is_tp,left_t,right_t,top,bottom,color_box,alpha_tp,alpha_sl) =>
+    if is_tp
+        box bx_tp = array.get(tp_box_arr,0)
+        if na(bx_tp)
+            bx_tp := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,60),border_color=color.new(color_box,0))
+            array.set(tp_box_arr,0,bx_tp)
+        else
+            box.set_left(bx_tp,left_t)
+            box.set_right(bx_tp,right_t)
+            box.set_top(bx_tp,top)
+            box.set_bottom(bx_tp,bottom)
+    else
+        box bx_sl = array.get(sl_box_arr,0)
+        if na(bx_sl)
+            bx_sl := box.new(left_t,top,right_t,bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(color_box,60),border_color=color.new(color_box,0))
+            array.set(sl_box_arr,0,bx_sl)
+        else
+            box.set_left(bx_sl,left_t)
+            box.set_right(bx_sl,right_t)
+            box.set_top(bx_sl,top)
+            box.set_bottom(bx_sl,bottom)
+
+draw_or_update_entry_line(left_t,right_t,price) =>
+    line ln = array.get(entry_line_ar,0)
+    if na(ln)
+        ln := line.new(left_t,price,right_t,price,xloc=xloc.bar_time,extend=extend.none,color=color.new(color.white,0),width=1)
+        array.set(entry_line_ar,0,ln)
+    else
+        line.set_x1(ln,left_t)
+        line.set_x2(ln,right_t)
+        line.set_y1(ln,price)
+        line.set_y2(ln,price)
+    label lb = array.get(entry_lbl_arr,0)
+    string txt = "Entry: "+str.tostring(price,format.mintick)
+    if na(lb)
+        lb := label.new(right_t,price,txt,xloc=xloc.bar_time,style=label.style_label_left,textcolor=color.white,color=color.new(color.gray,70),size=size.tiny)
+        array.set(entry_lbl_arr,0,lb)
+    else
+        label.set_x(lb,right_t)
+        label.set_y(lb,price)
+        label.set_text(lb,txt)
+
+// === [US-TI-44] Visuals — green box follows price after TP; robust even with SL=BE
+update_position_visuals() =>
+    bool can_draw = show_entries and (array.get(pos_entry_id_arr,0) != "") and not is_flat_pos()
+    if can_draw
+        float entry_px = array.get(pos_entry_px_arr,0)
+        float stop_px = array.get(pos_stop_px_arr,0)
+        float z_top = array.get(pos_zone_top_arr,0)
+        float z_bot = array.get(pos_zone_bottom_arr,0)
+        int left_t = array.get(pos_entry_time_arr,0)
+        int bar_step = na(time[1]) ? 0 : (time - time[1])
+        int right_t = time + bar_step
+        bool long_side = is_long_pos()
+        float zone_h = not na(z_top) and not na(z_bot) ? z_top - z_bot : na
+        float initial_sl = not na(zone_h) and not na(entry_px) ? (long_side ? z_bot - zone_h * sl_zone_pct : z_top + zone_h * sl_zone_pct) : na
+        float risk_initial = not na(initial_sl) and not na(entry_px) ? math.abs(entry_px - initial_sl) : na
+        if not na(entry_px) and not na(stop_px) and not na(left_t)
+            bool reached = false
+            float tp_px_static = entry_px
+            if not na(risk_initial) and risk_initial > 0
+                tp_px_static := long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
+                reached := long_side ? high >= tp_px_static : low <= tp_px_static
+            if reached
+                array.set(pos_hitTarget_arr,0,true)
+            if long_side
+                float tp_ref = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
+                float g_top = math.max(entry_px,tp_ref)
+                float g_bot = math.min(entry_px,tp_ref)
+                draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70)
+                float r_top = math.max(entry_px,stop_px)
+                float r_bot = math.min(entry_px,stop_px)
+                draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)
+                draw_or_update_entry_line(left_t,right_t,entry_px)
+            else
+                float tp_ref_s = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
+                float g_top_s = math.max(entry_px,tp_ref_s)
+                float g_bot_s = math.min(entry_px,tp_ref_s)
+                draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
+                float r_top_s = math.max(entry_px,stop_px)
+                float r_bot_s = math.min(entry_px,stop_px)
+                draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
+                draw_or_update_entry_line(left_t,right_t,entry_px)
+    else
+        delete_pos_boxes()
+
+// ============================================================================
+// === Compact trade id "YYMMDD.ZZZZ"
+zero2(n) => n < 10 ? "0"+str.tostring(n) : str.tostring(n)
+zero4(n) => n < 10 ? "000"+str.tostring(n) : n < 100 ? "00"+str.tostring(n) : n < 1000 ? "0"+str.tostring(n) : str.tostring(n)
+var order_no_arr = array.new_int()
+if barstate.isfirst
+    array.push(order_no_arr,0)
+next_order_no() =>
+    int cur = array.get(order_no_arr,0)
+    int nxt = cur + 1
+    array.set(order_no_arr,0,nxt)
+    nxt
+make_trade_id() =>
+    int yy = year % 100
+    zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero4(next_order_no())
+
 // === Unified label+alert+entry handler (B/S -> entry unless same direction)
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
+     
+
     if show_entries
         color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
         label_style = sig == "B" ? label.style_label_up : label.style_label_down
@@ -544,19 +540,29 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
             else if is_short_pos()
                 bool gate_ok = array.get(pos_hitTarget_arr,0) or array.get(pos_hitSL_arr,0)
                 allow_long := gate_ok
+            // [US-TI-43] Gate by ATR×mult
             if allow_long
                 float zone_h = zone_top - zone_bottom
                 float sl_long = zone_bottom - zone_h * sl_zone_pct
                 float risk_long = math.abs(close - sl_long)
                 bool risk_ok_long = risk_long <= atr_ct * max_position_atr_mult
                 if risk_ok_long
+                    // Mirror broker close first if flipping
                     if exec_strategy and is_short_pos()
-                        close_position("flip_short_to_long")
-                    string idL = open_position("LONG",tf_lbl,zone_type,zone_top,zone_bottom)
+                        string exit_idS = array.get(pos_entry_id_arr,0)
+                        if exit_idS != ""
+                            strategy.close("SHORT",comment=exit_idS)
+                    // SINGLE SOURCE OF TRUTH: arrays first
+                    clear_position_context()
+                    delete_pos_boxes()
+                    string new_id = make_trade_id()
+                    set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
+                    array.set(pos_side_arr,0,"LONG")
                     array.set(pos_stop_px_arr,0,sl_long)
+                    // Mirror to broker if executing
                     if exec_strategy
-                        strategy.entry("LONG",strategy.long,comment=idL)
-                        strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=idL)
+                        strategy.entry("LONG",strategy.long,comment=new_id)
+                        strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
 
     if sig == "S"
         bool already_short = is_short_pos()
@@ -567,21 +573,33 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
             else if is_long_pos()
                 bool gate_ok = array.get(pos_hitTarget_arr,0) or array.get(pos_hitSL_arr,0)
                 allow_short := gate_ok
+            // [US-TI-43] Gate by ATR×mult
             if allow_short
                 float zone_h = zone_top - zone_bottom
                 float sl_short = zone_top + zone_h * sl_zone_pct
                 float risk_short = math.abs(close - sl_short)
                 bool risk_ok_short = risk_short <= atr_ct * max_position_atr_mult
                 if risk_ok_short
+                    // Mirror broker close first if flipping
                     if exec_strategy and is_long_pos()
-                        close_position("flip_long_to_short")
-                    string idS = open_position("SHORT",tf_lbl,zone_type,zone_top,zone_bottom)
+                        string exit_idL = array.get(pos_entry_id_arr,0)
+                        if exit_idL != ""
+                            strategy.close("LONG",comment=exit_idL)
+                    // SINGLE SOURCE OF TRUTH: arrays first
+                    clear_position_context()
+                    delete_pos_boxes()
+                    string new_idS = make_trade_id()
+                    set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
+                    array.set(pos_side_arr,0,"SHORT")
                     array.set(pos_stop_px_arr,0,sl_short)
+                    // Mirror to broker if executing
                     if exec_strategy
-                        strategy.entry("SHORT",strategy.short,comment=idS)
-                        strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=idS)
+                        strategy.entry("SHORT",strategy.short,comment=new_idS)
+                        strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
 
-// === Close on opposite signal (same TF) — only after Target milestone
+
+
+// === [US-TI-44] Close on opposite signal (same TF) only after Target reached
 maybe_close_on_signal(sig,tf_lbl) =>
     string ctx_tf = array.get(pos_tf_label_arr,0)
     string ctx_id = array.get(pos_entry_id_arr,0)
@@ -591,7 +609,13 @@ maybe_close_on_signal(sig,tf_lbl) =>
         bool short_ctx = is_short_pos()
         bool is_opposite = (long_ctx and sig == "S") or (short_ctx and sig == "B")
         if is_opposite and target_ok
-            close_position("opposite_after_target")
+            if exec_strategy
+                if long_ctx
+                    strategy.close("LONG",comment=ctx_id)
+                if short_ctx
+                    strategy.close("SHORT",comment=ctx_id)
+            clear_position_context()
+            delete_pos_boxes()
 
 // === Universal MTF Pattern Detection ===
 detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_hist,atr_hist,time_hist) =>
@@ -733,7 +757,7 @@ detect_rejections() =>
                     handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("S",z.tf_label)
 
-// === Legacy exit manager disabled by TI-40 ===
+// === Legacy exit manager disabled by TI-40
 manage_exits_same_tf() => 0
 
 // === Trend squares ===
@@ -755,17 +779,15 @@ update_trend_table() =>
     table.cell(trend_tbl,3,0,"D1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(d1_up),text_size=size.huge)
     table.cell(trend_tbl,4,0,"W",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(w_up),text_size=size.huge)
 
-// === Optional live sync when exec ON ===
-sync_context_with_live_position() =>
-    if exec_strategy
-        if strategy.position_size == 0 and not is_flat_pos()
-            clear_position_context()
-            delete_pos_boxes()
+// === Optional broker sync — now a NO-OP (arrays are the only truth)
+sync_context_with_live_position() => 0
 
 // === Main ===
 main() =>
     update_stop_hit_flag()
+    maybe_close_on_stop_hit()
     update_profit_milestones()
+    update_break_even_stop()
     if show_60
         detect_mtf_patterns_universal("60","60M",mtf_open_history_60,mtf_high_history_60,mtf_low_history_60,mtf_close_history_60,mtf_atr_history_60,mtf_time_history_60)
     if show_15
@@ -775,15 +797,14 @@ main() =>
     if show_ct
         detect_mtf_patterns_universal("","CT",mtf_open_history_ct,mtf_high_history_ct,mtf_low_history_ct,mtf_close_history_ct,mtf_atr_history_ct,mtf_time_history_ct)
     update_zones()
-    ti2_cull_overlaps_same_tf()
     detect_rejections()
     if exec_strategy
         manage_exits_same_tf()
-    sync_context_with_live_position()
+    sync_context_with_live_position() // no-op by design
     update_position_visuals()
     update_trend_table()
-    watchdog_position_sweeper() // <-- moved to the end
-
 
 // Run main
 main()
+
+

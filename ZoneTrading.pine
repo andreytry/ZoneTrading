@@ -55,7 +55,7 @@ ema_slow_len = input.int(50,"Trend EMA Slow (CT)",minval=1,group=group_params)
 sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0.0,step=0.01,group=group_params)
 
 // [US-TI-43] Max risk gate: if |entry-stop| exceeds ATR × multiplier, skip the entry
-max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
+max_position_atr_mult = input.float(3.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
 
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
@@ -286,7 +286,7 @@ ti2_cull_overlaps_same_tf() =>
                 j += 1
         i += 1
 
-// === Position context ===
+// === Position context (single source of truth) ===
 var pos_tf_label_arr = array.new_string()
 var pos_zone_type_arr = array.new_string()
 var pos_zone_top_arr = array.new_float()
@@ -297,11 +297,8 @@ var pos_entry_time_arr = array.new_int()
 var pos_hit15_arr = array.new_bool()
 var pos_hitTarget_arr = array.new_bool()
 var pos_stop_px_arr = array.new_float()
-// [US-TI-40] explicit SL-hit flag
 var pos_hitSL_arr = array.new_bool()
-// [US-TI-40] virtual position side "", "LONG", "SHORT"
 var pos_side_arr = array.new_string()
-// [US-TI-44] BE moved flag
 var pos_sl_moved_be_arr = array.new_bool()
 
 if barstate.isfirst
@@ -368,10 +365,10 @@ update_profit_milestones() =>
             float tp_px = long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
             bool now_reached = long_side ? high >= tp_px : low <= tp_px
             if now_reached
-                array.set(pos_hit15_arr,0,true) // keep for compatibility
+                array.set(pos_hit15_arr,0,true)
                 array.set(pos_hitTarget_arr,0,true)
 
-// === SL-hit detector (intrabar) — works even with exec OFF)
+// === SL-hit detector (intrabar)
 update_stop_hit_flag() =>
     float e = array.get(pos_entry_px_arr,0)
     float s = array.get(pos_stop_px_arr,0)
@@ -408,7 +405,7 @@ update_break_even_stop() =>
                         else
                             strategy.exit("SHORT-SL",from_entry="SHORT",stop=entry_px,comment=id)
 
-// === [US-TI-44] Close immediately when SL is hit
+// === [US-TI-44] Close immediately when SL is hit (arrays own the truth)
 maybe_close_on_stop_hit() =>
     bool hit = array.get(pos_hitSL_arr,0)
     if hit
@@ -486,7 +483,7 @@ update_position_visuals() =>
                 tp_px_static := long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
                 reached := long_side ? high >= tp_px_static : low <= tp_px_static
             if reached
-                array.set(pos_hitTarget_arr,0,true) // keep milestone set once achieved
+                array.set(pos_hitTarget_arr,0,true)
             if long_side
                 float tp_ref = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
                 float g_top = math.max(entry_px,tp_ref)
@@ -526,6 +523,8 @@ make_trade_id() =>
 
 // === Unified label+alert+entry handler (B/S -> entry unless same direction)
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
+     
+
     if show_entries
         color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
         label_style = sig == "B" ? label.style_label_up : label.style_label_down
@@ -548,16 +547,19 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
                 float risk_long = math.abs(close - sl_long)
                 bool risk_ok_long = risk_long <= atr_ct * max_position_atr_mult
                 if risk_ok_long
+                    // Mirror broker close first if flipping
                     if exec_strategy and is_short_pos()
                         string exit_idS = array.get(pos_entry_id_arr,0)
                         if exit_idS != ""
                             strategy.close("SHORT",comment=exit_idS)
+                    // SINGLE SOURCE OF TRUTH: arrays first
                     clear_position_context()
                     delete_pos_boxes()
                     string new_id = make_trade_id()
                     set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_id)
                     array.set(pos_side_arr,0,"LONG")
                     array.set(pos_stop_px_arr,0,sl_long)
+                    // Mirror to broker if executing
                     if exec_strategy
                         strategy.entry("LONG",strategy.long,comment=new_id)
                         strategy.exit("LONG-SL",from_entry="LONG",stop=sl_long,comment=new_id)
@@ -578,19 +580,24 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
                 float risk_short = math.abs(close - sl_short)
                 bool risk_ok_short = risk_short <= atr_ct * max_position_atr_mult
                 if risk_ok_short
+                    // Mirror broker close first if flipping
                     if exec_strategy and is_long_pos()
                         string exit_idL = array.get(pos_entry_id_arr,0)
                         if exit_idL != ""
                             strategy.close("LONG",comment=exit_idL)
+                    // SINGLE SOURCE OF TRUTH: arrays first
                     clear_position_context()
                     delete_pos_boxes()
                     string new_idS = make_trade_id()
                     set_position_context(tf_lbl,zone_type,zone_top,zone_bottom,new_idS)
                     array.set(pos_side_arr,0,"SHORT")
                     array.set(pos_stop_px_arr,0,sl_short)
+                    // Mirror to broker if executing
                     if exec_strategy
                         strategy.entry("SHORT",strategy.short,comment=new_idS)
                         strategy.exit("SHORT-SL",from_entry="SHORT",stop=sl_short,comment=new_idS)
+
+
 
 // === [US-TI-44] Close on opposite signal (same TF) only after Target reached
 maybe_close_on_signal(sig,tf_lbl) =>
@@ -708,7 +715,7 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                                 if not na(oldest.zone_box)
                                     box.delete(oldest.zone_box)
                             ti2_cull_overlaps_same_tf()
-                            update_profit_milestones() // [US-TI-44] initial-risk based
+                            update_profit_milestones()
                             if zone_type == "Demand"
                                 handle_signal_and_entry("B",low,display_tf_label,zone_top,zone_bottom,zone_type)
                                 maybe_close_on_signal("B",display_tf_label)
@@ -738,7 +745,7 @@ detect_rejections() =>
                 bool left_up = close > z.top
                 bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
                 if touched and left_up and strong_up
-                    update_profit_milestones() // [US-TI-44] initial-risk based
+                    update_profit_milestones()
                     handle_signal_and_entry("B",low,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("B",z.tf_label)
             if z.zone_type == "Supply"
@@ -746,7 +753,7 @@ detect_rejections() =>
                 bool left_dn = close < z.bottom
                 bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
                 if touched and left_dn and strong_dn
-                    update_profit_milestones() // [US-TI-44]
+                    update_profit_milestones()
                     handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("S",z.tf_label)
 
@@ -772,19 +779,15 @@ update_trend_table() =>
     table.cell(trend_tbl,3,0,"D1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(d1_up),text_size=size.huge)
     table.cell(trend_tbl,4,0,"W",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=trend_color(w_up),text_size=size.huge)
 
-// === Optional live sync when exec ON (keeps virtual state consistent after broker auto-closings)
-sync_context_with_live_position() =>
-    if exec_strategy
-        if strategy.position_size == 0 and not is_flat_pos()
-            clear_position_context()
-            delete_pos_boxes()
+// === Optional broker sync — now a NO-OP (arrays are the only truth)
+sync_context_with_live_position() => 0
 
 // === Main ===
 main() =>
     update_stop_hit_flag()
-    maybe_close_on_stop_hit() // [US-TI-44]
-    update_profit_milestones() // [US-TI-44] initial-risk based milestone
-    update_break_even_stop() // [US-TI-44]
+    maybe_close_on_stop_hit()
+    update_profit_milestones()
+    update_break_even_stop()
     if show_60
         detect_mtf_patterns_universal("60","60M",mtf_open_history_60,mtf_high_history_60,mtf_low_history_60,mtf_close_history_60,mtf_atr_history_60,mtf_time_history_60)
     if show_15
@@ -797,9 +800,11 @@ main() =>
     detect_rejections()
     if exec_strategy
         manage_exits_same_tf()
-    sync_context_with_live_position()
-    update_position_visuals() // [US-TI-44] green box follows price after TP
+    sync_context_with_live_position() // no-op by design
+    update_position_visuals()
     update_trend_table()
 
 // Run main
 main()
+
+
