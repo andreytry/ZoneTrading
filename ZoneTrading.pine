@@ -57,7 +57,7 @@ sl_zone_pct = input.float(0.30,"Stoploss distance percent of zone size",minval=0
 // [US-TI-43] Max risk gate: if |entry-stop| exceeds ATR × multiplier, skip the entry
 max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,step=0.1,group=group_params)
 
-// TI-36 Position in the direction of trend VERSION4 — toggle default OFF; tooltip explains next-HTF live candle filter
+// TI-36: Position in the direction of trend VERSION4 — toggle updated (default OFF) and tooltip explains next-HTF live candle filter
 follow_strong_trend = input.bool(false,"Follow strong trend",group=group_params,tooltip="When ON: allow only LONG if the NEXT higher timeframe live candle is GREEN; allow only SHORT if it is RED. Mapping: 1→60, 5→60, 15→240, 60→240, 240→D, D→W. Uses live (unfinished) candles and may repaint.")
 
 // === Helpers for MTF data ===
@@ -464,10 +464,6 @@ draw_or_update_entry_line(left_t,right_t,price) =>
         label.set_y(lb,price)
         label.set_text(lb,txt)
 
-// === Position visualization colors (distinct from zones & candles) ===
-pos_color_green = color.rgb(0,128,0)   // darker green
-pos_color_red = color.rgb(128,0,32)    // bordeaux-like
-
 // === [US-TI-44] Visuals — green box follows price after TP; robust even with SL=BE
 update_position_visuals() =>
     bool can_draw = show_entries and (array.get(pos_entry_id_arr,0) != "") and not is_flat_pos()
@@ -495,19 +491,19 @@ update_position_visuals() =>
                 float tp_ref = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
                 float g_top = math.max(entry_px,tp_ref)
                 float g_bot = math.min(entry_px,tp_ref)
-                draw_or_update_box(true,left_t,right_t,g_top,g_bot,pos_color_green,60,70)
+                draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70)
                 float r_top = math.max(entry_px,stop_px)
                 float r_bot = math.min(entry_px,stop_px)
-                draw_or_update_box(false,left_t,right_t,r_top,r_bot,pos_color_red,60,70)
+                draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)
                 draw_or_update_entry_line(left_t,right_t,entry_px)
             else
                 float tp_ref_s = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
                 float g_top_s = math.max(entry_px,tp_ref_s)
                 float g_bot_s = math.min(entry_px,tp_ref_s)
-                draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,pos_color_green,60,70)
+                draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
                 float r_top_s = math.max(entry_px,stop_px)
                 float r_bot_s = math.min(entry_px,stop_px)
-                draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,pos_color_red,60,70)
+                draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
                 draw_or_update_entry_line(left_t,right_t,entry_px)
     else
         delete_pos_boxes()
@@ -528,16 +524,16 @@ make_trade_id() =>
     int yy = year % 100
     zero2(yy)+zero2(month)+zero2(dayofmonth)+"."+zero4(next_order_no())
 
-// TI-47: Live HTF candle color (repainting by design) — declared ABOVE any usage
-get_live_htf_up(tf) =>
-    [o, c] = request.security(syminfo.tickerid,tf,[open,close],lookahead=barmerge.lookahead_on)
-    c > o
-
-// TI-36 Position in the direction of trend VERSION4 — map current TF to next higher TF
+// TI-36: Position in the direction of trend VERSION4 — helper: map current TF to next higher TF
 next_higher_timeframe(tf) =>
     tf == "1" ? "60" : tf == "5" ? "60" : tf == "15" ? "240" : tf == "60" ? "240" : tf == "240" ? "D" : tf == "D" ? "W" : ""
 
-// TI-36 Position in the direction of trend VERSION4 — apply live HTF candle gating
+// === TI-47: Live HTF candle color (repainting by design) ===
+get_live_htf_up(tf) =>
+    [o, c] = request.security(syminfo.tickerid, tf, [open, close], lookahead=barmerge.lookahead_on)
+    c > o
+
+// TI-36: Position in the direction of trend VERSION4 — helper: apply live HTF candle gating
 should_block_by_next_htf(sig) =>
     if not follow_strong_trend
         false
@@ -554,7 +550,7 @@ should_block_by_next_htf(sig) =>
 
 // === Unified label+alert+entry handler (B/S -> entry unless same direction)
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
-    // TI-36 Position in the direction of trend VERSION4 — remove EMA-stack suppression; use next-HTF live candle filter instead
+    // TI-36: Position in the direction of trend VERSION4 — remove EMA-stack suppression; use next-HTF live candle filter instead
     bool blocked = should_block_by_next_htf(sig)
 
     if not blocked
@@ -580,10 +576,12 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
                     float risk_long = math.abs(close - sl_long)
                     bool risk_ok_long = risk_long <= atr_ct * max_position_atr_mult
                     if risk_ok_long
+                        // Mirror broker close first if flipping
                         if exec_strategy and is_short_pos()
                             string exit_idS = array.get(pos_entry_id_arr,0)
                             if exit_idS != ""
                                 strategy.close("SHORT",comment=exit_idS)
+                        // Arrays own the truth
                         clear_position_context()
                         delete_pos_boxes()
                         string new_id = make_trade_id()
@@ -610,10 +608,12 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
                     float risk_short = math.abs(close - sl_short)
                     bool risk_ok_short = risk_short <= atr_ct * max_position_atr_mult
                     if risk_ok_short
+                        // Mirror broker close first if flipping
                         if exec_strategy and is_long_pos()
                             string exit_idL = array.get(pos_entry_id_arr,0)
                             if exit_idL != ""
                                 strategy.close("LONG",comment=exit_idL)
+                        // Arrays own the truth
                         clear_position_context()
                         delete_pos_boxes()
                         string new_idS = make_trade_id()
@@ -801,13 +801,18 @@ manage_exits_same_tf() => 0
 var table trend_tbl = table.new(position.bottom_right,5,1)
 trend_color(is_up) => is_up ? color.new(color.green,0) : color.new(color.red,0)
 
-// === Trend squares (CT uses EMAs; HTFs use unfinished live bars)
+
+
+// === Trend squares (CT uses EMAs; HTFs use unfinished live bars) ===
 update_trend_table() =>
-    bool ct_up = ta.ema(close,ema_fast_len) > ta.ema(close,ema_slow_len)
+    bool ct_up = ta.ema(close, ema_fast_len) > ta.ema(close, ema_slow_len)
+
+    // Live, developing higher timeframe candles
     bool h1_up = get_live_htf_up("60")
     bool h4_up = get_live_htf_up("240")
     bool d1_up = get_live_htf_up("D")
-    bool w_up = get_live_htf_up("W")
+    bool w_up  = get_live_htf_up("W")
+
     table.cell(trend_tbl,0,0,"CT",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=ct_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,1,0,"H1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h1_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,2,0,"H4",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h4_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
