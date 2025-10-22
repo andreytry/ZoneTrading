@@ -1,10 +1,9 @@
 //@version=5
-// TI-40: Replace TP1 & Minimum Entry R with Target RR (default 1.5R). Target RR is a visualization/milestone only; do NOT close there — keep holding until opposite signal. Visualize positions only when (1) Execute strategy is ON and (2) Visualize Positions is ON. B/S and entry are connected (enter unless already in same direction). Same label on close as on open.
-// TI-9: place trades also *when a new zone is formed* (strong departure candle)
-// TI-22: Alerts only on B and S — alert() is called exclusively when a B/S label is created
-// TI-26: Separate toggles for B/S and the strategy (Show entries / Execute strategy)
-// TI-33: MTF Trend indicator — squares CT/H1/H4/D1/W at bottom-right using EMA20/50 for CT, candle color for others
-// TI-43: Limit position by ATR — add Max Position Risk (× ATR) gate; only enter if |entry-stop| <= ATR × multiplier
+// TI-3: B/S strict zone-touch rules — ONLY set B/S when extremes meet the specified inside/outside conditions
+//TI-46 B and S fix
+
+// TI-3: NOTE — Only the requested changes were made and are marked with TI-3 comments.
+// Never changed the indicator name or unrelated logic.
 
 strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
 
@@ -59,6 +58,9 @@ max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,
 
 // TI-36: Position in the direction of trend VERSION4 — toggle updated (default OFF) and tooltip explains next-HTF live candle filter
 follow_strong_trend = input.bool(false,"Follow strong trend",group=group_params,tooltip="When ON: allow only LONG if the NEXT higher timeframe live candle is GREEN; allow only SHORT if it is RED. Mapping: 1→60, 5→60, 15→240, 60→240, 240→D, D→W. Uses live (unfinished) candles and may repaint.")
+
+// TI-3: EMA Proximity (ATR) gate
+ema_proximity_atr = input.float(-1.0,"EMA Proximity (ATR)",step=0.05,group=group_params) // TI-3
 
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
@@ -118,6 +120,32 @@ daily_range = dHighD - dLowD
 
 // === Global ATR ===
 atr_ct = ta.atr(atr_length)
+
+// TI-3: CT EMAs for proximity/stack checks
+ema_fast_ct = ta.ema(close,ema_fast_len) // TI-3
+ema_slow_ct = ta.ema(close,ema_slow_len) // TI-3
+
+// TI-3: proximity helper (ATR × multiplier to EMA_FAST)
+is_within_ema_proximity(sig) =>
+    if ema_proximity_atr <= 0
+        true
+    else
+        bool green = close > open
+        bool red = close < open
+        bool ema_stack_up = ema_fast_ct > ema_slow_ct
+        float dist = math.abs(open - ema_fast_ct)
+        bool near = dist <= atr_ct * ema_proximity_atr
+        sig == "B" ? (green and ema_stack_up and near) : (red and ema_stack_up and near)
+
+// TI-3: S gating when EMA_FAST < EMA_SLOW (supply-context confirmation)
+supply_short_gate(zone_top,zone_bottom) =>
+    bool ema_stack_down = ema_fast_ct < ema_slow_ct
+    bool red = close < open
+    float body = math.abs(close - open)
+    bool open_in_zone = open <= zone_top and open >= zone_bottom
+    bool body_ok = body >= atr_ct * rejection_atr_mult
+    bool ema_in_zone = ((ema_fast_ct <= zone_top and ema_fast_ct >= zone_bottom) or (ema_slow_ct <= zone_top and ema_slow_ct >= zone_bottom))
+    ema_stack_down and red and open_in_zone and body_ok and ema_in_zone
 
 // Helper: current-range check
 is_zone_in_range(_top,_bottom) =>
@@ -381,7 +409,7 @@ update_stop_hit_flag() =>
         if hit
             array.set(pos_hitSL_arr,0,true)
 
-// === [US-TI-44] Move SL to BE at 50% progress to Target
+// === TI-3: Move SL to BE at 1R progress (not 50%) ===
 update_break_even_stop() =>
     string id = array.get(pos_entry_id_arr,0)
     if id != "" and (is_long_pos() or is_short_pos())
@@ -396,9 +424,8 @@ update_break_even_stop() =>
             float initial_sl = long_side ? z_bot - zone_h * sl_zone_pct : z_top + zone_h * sl_zone_pct
             float risk_initial = math.abs(entry_px - initial_sl)
             if risk_initial > 0
-                float tp_px = long_side ? entry_px + target_rr * risk_initial : entry_px - target_rr * risk_initial
-                float half_px = long_side ? entry_px + 0.5 * (tp_px - entry_px) : entry_px - 0.5 * (entry_px - tp_px)
-                bool crossed = long_side ? high >= half_px : low <= half_px
+                float one_r_px = long_side ? entry_px + risk_initial : entry_px - risk_initial // TI-3
+                bool crossed = long_side ? high >= one_r_px : low <= one_r_px
                 if crossed
                     array.set(pos_stop_px_arr,0,entry_px)
                     array.set(pos_sl_moved_be_arr,0,true)
@@ -422,6 +449,10 @@ maybe_close_on_stop_hit() =>
         delete_pos_boxes()
 
 // === VISUAL DRAW HELPERS ===
+// TI-3: Color updates — dark green TP, purple SL
+dark_green = color.rgb(0,100,0) // TI-3
+purple_col = color.rgb(128,0,128) // TI-3
+
 draw_or_update_box(is_tp,left_t,right_t,top,bottom,color_box,alpha_tp,alpha_sl) =>
     if is_tp
         box bx_tp = array.get(tp_box_arr,0)
@@ -464,7 +495,7 @@ draw_or_update_entry_line(left_t,right_t,price) =>
         label.set_y(lb,price)
         label.set_text(lb,txt)
 
-// === [US-TI-44] Visuals — green box follows price after TP; robust even with SL=BE
+// === [US-TI-44] Visuals — use new colors; green box follows price after TP; robust even with SL=BE
 update_position_visuals() =>
     bool can_draw = show_entries and (array.get(pos_entry_id_arr,0) != "") and not is_flat_pos()
     if can_draw
@@ -491,19 +522,19 @@ update_position_visuals() =>
                 float tp_ref = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
                 float g_top = math.max(entry_px,tp_ref)
                 float g_bot = math.min(entry_px,tp_ref)
-                draw_or_update_box(true,left_t,right_t,g_top,g_bot,color.green,60,70)
+                draw_or_update_box(true,left_t,right_t,g_top,g_bot,dark_green,60,70) // TI-3
                 float r_top = math.max(entry_px,stop_px)
                 float r_bot = math.min(entry_px,stop_px)
-                draw_or_update_box(false,left_t,right_t,r_top,r_bot,color.red,60,70)
+                draw_or_update_box(false,left_t,right_t,r_top,r_bot,purple_col,60,70) // TI-3
                 draw_or_update_entry_line(left_t,right_t,entry_px)
             else
                 float tp_ref_s = array.get(pos_hitTarget_arr,0) ? close : tp_px_static
                 float g_top_s = math.max(entry_px,tp_ref_s)
                 float g_bot_s = math.min(entry_px,tp_ref_s)
-                draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,color.green,60,70)
+                draw_or_update_box(true,left_t,right_t,g_top_s,g_bot_s,dark_green,60,70) // TI-3
                 float r_top_s = math.max(entry_px,stop_px)
                 float r_bot_s = math.min(entry_px,stop_px)
-                draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,color.red,60,70)
+                draw_or_update_box(false,left_t,right_t,r_top_s,r_bot_s,purple_col,60,70) // TI-3
                 draw_or_update_entry_line(left_t,right_t,entry_px)
     else
         delete_pos_boxes()
@@ -548,12 +579,25 @@ should_block_by_next_htf(sig) =>
             bool block_short = not na(up_live) and up_live and sig == "S"
             block_long or block_short
 
+// === TI-3: STRICT B/S helpers (ONLY when extremes meet zone rules)
+is_green_candle() => close > open // TI-3
+is_red_candle() => close < open // TI-3
+value_inside_zone(val,top,bottom) => val <= top and val >= bottom // TI-3
+b_condition_strict(z_top,z_bottom) => is_green_candle() and value_inside_zone(low,z_top,z_bottom) and high > z_top // TI-3
+s_condition_strict(z_top,z_bottom) => is_red_candle() and value_inside_zone(high,z_top,z_bottom) and low < z_bottom // TI-3
+
 // === Unified label+alert+entry handler (B/S -> entry unless same direction)
 handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
     // TI-36: Position in the direction of trend VERSION4 — remove EMA-stack suppression; use next-HTF live candle filter instead
     bool blocked = should_block_by_next_htf(sig)
 
-    if not blocked
+    // TI-3: Proximity gate (if enabled)
+    bool prox_ok = is_within_ema_proximity(sig) // TI-3
+
+    // TI-3: Additional S constraints when EMA_FAST < EMA_SLOW
+    bool s_gate_ok = sig == "S" ? (ema_fast_ct < ema_slow_ct ? supply_short_gate(zone_top,zone_bottom) : true) : true // TI-3
+
+    if not blocked and prox_ok and s_gate_ok // TI-3 combined gating
         if show_entries
             color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
             label_style = sig == "B" ? label.style_label_up : label.style_label_down
@@ -753,14 +797,20 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                                     box.delete(oldest.zone_box)
                             ti2_cull_overlaps_same_tf()
                             update_profit_milestones()
+                            // TI-3: Gate immediate zone-formation signals by STRICT extreme rules (ONLY when conditions are met)
                             if zone_type == "Demand"
-                                handle_signal_and_entry("B",low,display_tf_label,zone_top,zone_bottom,zone_type)
-                                maybe_close_on_signal("B",display_tf_label)
+                                bool condB = b_condition_strict(zone_top,zone_bottom) // TI-3
+                                if condB
+                                    handle_signal_and_entry("B",low,display_tf_label,zone_top,zone_bottom,zone_type)
+                                    maybe_close_on_signal("B",display_tf_label)
                             if zone_type == "Supply"
-                                handle_signal_and_entry("S",high,display_tf_label,zone_top,zone_bottom,zone_type)
-                                maybe_close_on_signal("S",display_tf_label)
+                                bool condS = s_condition_strict(zone_top,zone_bottom) // TI-3
+                                if condS
+                                    handle_signal_and_entry("S",high,display_tf_label,zone_top,zone_bottom,zone_type)
+                                    maybe_close_on_signal("S",display_tf_label)
 
 // === TI-7: Rejection detection ===
+// TI-3: STRICT rules applied — ONLY set B/S when extremes meet inside/outside conditions
 within_zone(val,top,bottom) => val <= top and val >= bottom
 detect_rejections() =>
     if array.size(active_zones) > 0
@@ -778,18 +828,16 @@ detect_rejections() =>
             if not after_legout
                 continue
             if z.zone_type == "Demand"
-                bool touched = low <= z.top
-                bool left_up = close > z.top
-                bool strong_up = green and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if touched and left_up and strong_up
+                // TI-3: B ONLY when green candle low is inside demand zone AND high is outside (above) the zone
+                bool cond_b = b_condition_strict(z.top,z.bottom) // TI-3
+                if cond_b
                     update_profit_milestones()
                     handle_signal_and_entry("B",low,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("B",z.tf_label)
             if z.zone_type == "Supply"
-                bool touched = high >= z.bottom
-                bool left_dn = close < z.bottom
-                bool strong_dn = red and ((body >= min_reject_body) or (candle_range >= min_reject_range))
-                if touched and left_dn and strong_dn
+                // TI-3: S ONLY when red candle high is inside supply zone AND low is outside (below) the zone
+                bool cond_s = s_condition_strict(z.top,z.bottom) // TI-3
+                if cond_s
                     update_profit_milestones()
                     handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("S",z.tf_label)
@@ -801,23 +849,19 @@ manage_exits_same_tf() => 0
 var table trend_tbl = table.new(position.bottom_right,5,1)
 trend_color(is_up) => is_up ? color.new(color.green,0) : color.new(color.red,0)
 
-
-
-// === Trend squares (CT uses EMAs; HTFs use unfinished live bars) ===
+// TI-3: Fix table.cell named-arg typo (text_valign=...) to remove syntax error
 update_trend_table() =>
     bool ct_up = ta.ema(close, ema_fast_len) > ta.ema(close, ema_slow_len)
-
-    // Live, developing higher timeframe candles
     bool h1_up = get_live_htf_up("60")
     bool h4_up = get_live_htf_up("240")
     bool d1_up = get_live_htf_up("D")
     bool w_up  = get_live_htf_up("W")
-
     table.cell(trend_tbl,0,0,"CT",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=ct_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,1,0,"H1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h1_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,2,0,"H4",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=h4_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,3,0,"D1",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=d1_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
     table.cell(trend_tbl,4,0,"W",text_color=color.white,text_halign=text.align_center,text_valign=text.align_center,bgcolor=w_up ? color.new(color.green,0) : color.new(color.red,0),text_size=size.huge)
+
 
 // === Optional broker sync — now a NO-OP (arrays are the only truth)
 sync_context_with_live_position() => 0

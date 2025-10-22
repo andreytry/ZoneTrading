@@ -526,60 +526,7 @@ DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 
 
 
-=================================
-//TI-3 EMA as a confluence
 
-update the script
-
-Assume EMA_FAST = EMA50 (EMA length is a setting)
-Assume EMA_SLOW = EMA100 (EMA length is a setting)
-
-Enter LONG when
-EMA_FAST is above EMA_SLOW
-The price shows a green candle starting within a demand zone 
-The size of the candle is minimum  (Rejection Candle Min Body (xATR) setting)
-EMA_FAST or EMA_SLOW is in the same demand zone
-Stoploss below the demand zone - 30% of the zone size (setting Stoploss distance percent of zone size) 
-Takeprofit R3
-
-
-EMA_FAST is below EMA_SLOW.
-
-Price prints a red candle that starts within a supply zone (open inside the zone).
-The candle’s body is ≥ Rejection Candle Min Body (× ATR).
-EMA_FAST or EMA_SLOW is inside the same supply zone.
-Stop-loss: above the supply zone by 30% of the zone height (Stoploss distance percent of zone size).
-Take-profit: R3 (3× the entry-to-stop distance).
-
-Risk management: 
-Stoploss to breakeven when 1R reached
-Visualize the entry with the dark green rectange beween entry and TO, purple rectange between entry and SL - standard represnetation in TradingView
-
-
-
-Add the following condition for S:
-if the strong green candle departing the zone follows a red candle , it must engulf it
-
-
-Mark the changes with user story ID: TI-3
-
-Use the code below as the starting point!!!
-IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
-Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
-Use clean identifier names that have business meaning!!!
-Never change the name of the indicator!!!
-The code you generate must be syntactycally correct pinescript , compile without errors
-Never use the functions that are not in the standard library, like math.inf
-DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
-Dont make newline between function arguments
-Dont modify global vriables inside a function
-
-
-
-
-REJECTION FROM EMA20/50/100 IS A PRIO!!! 
-
-ZONE INVALIDATION IS A PRIO!!!!!
 
 
 
@@ -1166,7 +1113,7 @@ REMOVE THIS LOGIC:
 If EMA20 < EMA50 < EMA100 < EMA200 -> Dont display B signals and ignore them for positions
 If EMA20 > EMA50 > EMA100 > EMA200 -> Dont display S signals and ignore them for positions
 
-INSTEAD
+INSTEAD IMPLEMNT THIS
 Offer only LONG positions if next higher timeframe is green
 offer only SHORT positions if next higher timeframe is RED
 Find next higher timeframe as follows:
@@ -1179,7 +1126,7 @@ h4->d
 d->w
 
 Make this feature controllable by the toggle "Follow strong trend" + explanation in "hover-on" information box (if possible)
-
+Default toggle OFF
 
 
 
@@ -1253,3 +1200,150 @@ Dont modify global vriables inside a function
 
 ONCE GENERATED THE CODE - CHECK CAREFULLY IF ALL REQUIREMENTS ARE FULFILLED! INCLUDE THE ANALYSIS REPORT BEFORE THE OUTPUT CODE!!!!
 TAKE THE CODE BELOW AS THE START POINT!!! NO CHANGES OTHER THEN REQUESED ONES!!!
+
+
+
+=================================
+//TI-3 EMA as a confluence
+
+update the script
+
+Assume EMA_FAST = EMA50 (EMA length is a setting)
+Assume EMA_SLOW = EMA100 (EMA length is a setting)
+
+Enter LONG when
+EMA_FAST is above EMA_SLOW
+The price shows a green candle starting within a demand zone 
+The size of the candle is minimum  (Rejection Candle Min Body (xATR) setting)
+EMA_FAST or EMA_SLOW is in the same demand zone
+Stoploss below the demand zone - 30% of the zone size (setting Stoploss distance percent of zone size) 
+Takeprofit R3
+
+
+EMA_FAST is below EMA_SLOW.
+
+Price prints a red candle that starts within a supply zone (open inside the zone).
+The candle’s body is ≥ Rejection Candle Min Body (× ATR).
+EMA_FAST or EMA_SLOW is inside the same supply zone.
+Stop-loss: above the supply zone by 30% of the zone height (Stoploss distance percent of zone size).
+Take-profit: R3 (3× the entry-to-stop distance).
+
+Risk management: 
+Stoploss to breakeven when 1R reached
+Visualize the entry with the dark green rectange beween entry and TO, purple rectange between entry and SL - standard represnetation in TradingView
+
+
+
+Add the following condition for S:
+if the strong green candle departing the zone follows a red candle , it must engulf it
+
+
+Mark the changes with user story ID: TI-3
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+
+REJECTION FROM EMA20/50/100 IS A PRIO!!! 
+
+ZONE INVALIDATION IS A PRIO!!!!!
+
+
+
+=================================
+//TI-3 EMA as a confluence V2
+
+update the script
+
+Introduce a setting "EMA Proximity (ATR)" default -1
+If EMA Proximity is > 0 then show only B and S (end execute corresponding strategy entries) ONLY when the following conditions are met
+
+Assume EMA_FAST = EMA20 (EMA length is a setting)
+Assume EMA_SLOW = EMA50 (EMA length is a setting)
+
+The price shows a green candle and current conditions for B are fulfilled 
+EMA_FAST is above EMA_SLOW
+The open price of the candle is within proximity of EMA_FAST (Setting EMA Proximity (ATR))
+
+OR
+
+The price shows a red candle and current conditions for S are fulfilled 
+EMA_FAST is above EMA_SLOW
+The open price of the candle is within proximity of EMA_FAST (Setting EMA Proximity (ATR))
+
+
+
+
+
+EMA_FAST is below EMA_SLOW.
+
+Price prints a red candle that starts within a supply zone (open inside the zone).
+The candle’s body is ≥ Rejection Candle Min Body (× ATR).
+EMA_FAST or EMA_SLOW is inside the same supply zone.
+Stop-loss: above the supply zone by 30% of the zone height (Stoploss distance percent of zone size).
+Take-profit: R3 (3× the entry-to-stop distance).
+
+Risk management: 
+Stoploss to breakeven when 1R reached
+Visualize the entry with the dark green rectange beween entry and TO, purple rectange between entry and SL - standard represnetation in TradingView
+
+
+
+Add the following condition for S:
+if the strong green candle departing the zone follows a red candle , it must engulf it
+
+
+Mark the changes with user story ID: TI-3
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+
+
+REJECTION FROM EMA20/50/100 IS A PRIO!!! 
+
+ZONE INVALIDATION IS A PRIO!!!!!
+
+
+
+=================================
+//TI-46 B and S fix
+
+update the script
+
+B are set ONLY when the green candle low is in the demand zone and high is outside the zone. 
+And S is set ONLY when the red cadle high is insie a supply zone and low is outside the zone?
+
+Mark the changes with user story ID: TI-3
+
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
