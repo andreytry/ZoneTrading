@@ -59,6 +59,9 @@ max_position_atr_mult = input.float(1.0,"Max Position Risk (× ATR)",minval=0.1,
 // TI-36: Position in the direction of trend VERSION4 — toggle updated (default OFF) and tooltip explains next-HTF live candle filter
 follow_strong_trend = input.bool(false,"Follow strong trend",group=group_params,tooltip="When ON: allow only LONG if the NEXT higher timeframe live candle is GREEN; allow only SHORT if it is RED. Mapping: 1→60, 5→60, 15→240, 60→240, 240→D, D→W. Uses live (unfinished) candles and may repaint.") // [TI-36] D→W
 
+// [TI-36] NEW: Take only in the direction of CT trend (LONG on CT green, SHORT on CT red)
+take_only_ct_trend = input.bool(true,"Take only in the direction of trend",group=group_params,tooltip="When ON: allow LONG only if CT trend is up (green) and SHORT only if CT trend is down (red).") // [TI-36]
+
 // TI-3: EMA Proximity (ATR) gate — used as a feature toggle and ATR-based tolerance
 ema_proximity_atr = input.float(-1.0,"EMA Proximity (ATR)",step=0.05,group=group_params) // TI-3
 
@@ -636,6 +639,9 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
     // TI-36: gating via unified trend indicator (H1/H4/D1/W) — single source of truth
     bool blocked = should_block_by_next_htf(sig) // [TI-39]
 
+    // [TI-36] Enforce CT-direction-only rule (LONG only if CT up/green, SHORT only if CT down/red) when enabled
+    bool blocked_ct = take_only_ct_trend ? ((sig == "B" and not ct_up_trend) or (sig == "S" and ct_up_trend)) : false // [TI-36]
+
     // TI-3: Proximity gate to EMA20 (if enabled)
     bool prox_ok = is_within_ema_proximity(sig) // TI-3
 
@@ -646,7 +652,7 @@ handle_signal_and_entry(sig,y,tf_lbl,zone_top,zone_bottom,zone_type) =>
     bool ema_major_gate_ok = ema_proximity_atr > 0 ? is_near_any_major_ema() : true // TI-3
     bool htf_align_ok = ema_proximity_atr > 0 ? htf_trend_alignment_ok(sig) : true // [TI-39]
 
-    if not blocked and prox_ok and s_gate_ok and ema_major_gate_ok and htf_align_ok // TI-3 combined gating
+    if not blocked and not blocked_ct and prox_ok and s_gate_ok and ema_major_gate_ok and htf_align_ok // TI-3 + [TI-36] combined gating
         if show_entries
             color c = sig == "B" ? color.new(color.green,0) : color.new(color.red,0)
             label_style = sig == "B" ? label.style_label_up : label.style_label_down
