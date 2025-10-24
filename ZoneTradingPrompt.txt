@@ -1355,7 +1355,8 @@ update the script
 Calculate trend for the trend widget on timrframes CT, H1, H4, D1, W as follows
 
 CT - as is
-H1 - find the open of the candle that was 1 hour ago - thats start_price. Current price is end. Calculate Delta = end - start
+H1 - find the open of the candle that was 1 hour ago - thats start_price.
+    Current price is end. Calculate Delta = end - start. USE CURRENT TIMEFRAME!!!
 If Delta >= 0 -> segment H1 green, else red
 H4 - same as H1
 D, M - as is
@@ -1387,7 +1388,7 @@ update the script
 Introduce "RSI filter " setting default false
 If RSI filter is true -  then
 issue B ssignals ONLY if the RSI < 50  (setting)
-issue S signal ONLY if the RSI >= 50
+issue S signal ONLY if the RSI >= 50 (setting)
 
 
 
