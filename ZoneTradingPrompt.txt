@@ -1457,3 +1457,26 @@ Never use the functions that are not in the standard library, like math.inf
 DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
 Dont make newline between function arguments
 Dont modify global vriables inside a function
+
+
+
+
+=================================
+//TI-52  Calculate B/S intracandle
+
+update the script
+
+Make B/S calculate intra-candle on each tick  (only B/s if possible, zones are calculated per candle)
+
+
+Mark the changes with user story ID:
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function

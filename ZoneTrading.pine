@@ -5,7 +5,8 @@
 // TI-3: NOTE — Only the requested changes were made and are marked with TI-3 comments.
 // Never changed the indicator name or unrelated logic.
 
-strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts", overlay=true, max_boxes_count=500, pyramiding=0)
+// TI-52: Enable intra-candle (on-tick) B/S evaluation — zones remain per-candle
+strategy("Supply/Demand Zones with Zone Arrival/Departure Alerts",overlay=true,max_boxes_count=500,pyramiding=0,calc_on_every_tick=true)
 
 // === Constants ===
 HISTORY_LENGTH = 500
