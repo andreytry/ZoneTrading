@@ -1361,6 +1361,35 @@ H4 - same as H1
 D, M - as is
 
 
+Use THIS INDICATOR FOR ALL TREND CONFIRMATIONS NO SEPARATE CANDLE-BASED LOGIC!!
+THE INDICATOR IS THE SIGNLE SOURCE OF TRUTH FOR TREND!!!
+
+
+
+Mark the changes with user story ID:
+Use the code below as the starting point!!!
+IMPORTANT!!! Any other changes to the code except for the requested ones are strongly prohibited!!!
+Never use user story ID like TI-1, TI-2 or whatever to name functions variables and other identifiers!!!! it is only for comments!!! 
+Use clean identifier names that have business meaning!!!
+Never change the name of the indicator!!!
+The code you generate must be syntactycally correct pinescript , compile without errors
+Never use the functions that are not in the standard library, like math.inf
+DOUBLE CHECK THE SYNTACTICAL CORRECTNESS!!!!
+Dont make newline between function arguments
+Dont modify global vriables inside a function
+
+
+=================================
+//TI-35  RSI-gate
+
+update the script
+
+Introduce "RSI filter " setting default false
+If RSI filter is true -  then
+issue B ssignals ONLY if the RSI < 50  (setting)
+issue S signal ONLY if the RSI >= 50
+
+
 
 Mark the changes with user story ID:
 Use the code below as the starting point!!!
