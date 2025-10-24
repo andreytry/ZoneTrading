@@ -62,6 +62,10 @@ follow_strong_trend = input.bool(false,"Follow strong trend",group=group_params,
 // TI-3: EMA Proximity (ATR) gate — used as a feature toggle and ATR-based tolerance
 ema_proximity_atr = input.float(-1.0,"EMA Proximity (ATR)",step=0.05,group=group_params) // TI-3
 
+// === [TI-35] RSI-gate inputs ===
+use_rsi_filter = input.bool(false,"RSI filter",group=group_params) // [TI-35]
+rsi_threshold = input.float(50.0,"RSI Threshold",minval=0.0,maxval=100.0,step=0.1,group=group_params) // [TI-35]
+
 // === Helpers for MTF data ===
 body_size_mtf(_open,_close) => math.abs(_close - _open)
 is_green_mtf(_open,_close) => _close > _open
@@ -120,6 +124,10 @@ daily_range = dHighD - dLowD
 
 // === Global ATR ===
 atr_ct = ta.atr(atr_length)
+
+// === [TI-35] RSI-gate calc ===
+rsi_value = ta.rsi(close,14) // [TI-35]
+rsi_gate_ok(sig) => not use_rsi_filter ? true : (sig == "B" ? (rsi_value < rsi_threshold) : (rsi_value >= rsi_threshold)) // [TI-35]
 
 // TI-3: CT EMAs for proximity/stack checks + major EMAs
 ema_fast_ct = ta.ema(close,ema_fast_len) // TI-3
@@ -834,12 +842,12 @@ detect_mtf_patterns_universal(tf,tf_label,open_hist,high_hist,low_hist,close_his
                             // TI-3: Gate immediate zone-formation signals by STRICT extreme rules (ONLY when conditions are met)
                             if zone_type == "Demand"
                                 bool condB = b_condition_strict(zone_top,zone_bottom) // TI-3
-                                if condB
+                                if condB and rsi_gate_ok("B") // [TI-35]
                                     handle_signal_and_entry("B",low,display_tf_label,zone_top,zone_bottom,zone_type)
                                     maybe_close_on_signal("B",display_tf_label)
                             if zone_type == "Supply"
                                 bool condS = s_condition_strict(zone_top,zone_bottom) // TI-3
-                                if condS
+                                if condS and rsi_gate_ok("S") // [TI-35]
                                     handle_signal_and_entry("S",high,display_tf_label,zone_top,zone_bottom,zone_type)
                                     maybe_close_on_signal("S",display_tf_label)
 
@@ -864,14 +872,14 @@ detect_rejections() =>
             if z.zone_type == "Demand"
                 // TI-3: B ONLY when green candle low is inside demand zone AND high is outside (above) the zone
                 bool cond_b = b_condition_strict(z.top,z.bottom) // TI-3
-                if cond_b
+                if cond_b and rsi_gate_ok("B") // [TI-35]
                     update_profit_milestones()
                     handle_signal_and_entry("B",low,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("B",z.tf_label)
             if z.zone_type == "Supply"
                 // TI-3: S ONLY when red candle high is inside supply zone AND low is outside (below) the zone
                 bool cond_s = s_condition_strict(z.top,z.bottom) // TI-3
-                if cond_s
+                if cond_s and rsi_gate_ok("S") // [TI-35]
                     update_profit_milestones()
                     handle_signal_and_entry("S",high,z.tf_label,z.top,z.bottom,z.zone_type)
                     maybe_close_on_signal("S",z.tf_label)
